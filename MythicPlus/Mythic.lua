@@ -218,8 +218,16 @@ local function OnBossKilled(event, creature, killer)
     end
 end
 
-for _, data in pairs(MythicBosses) do
-    for _, bossId in ipairs(data.bosses) do
-        RegisterCreatureEvent(bossId, 4, OnBossKilled)
+local function onKillBoss(event, player, boss)
+    if not boss then return end
+    for _, data in pairs(MythicBosses) do
+        for _, bossId in ipairs(data.bosses) do
+            if boss:GetEntry() == bossId then
+                OnBossKilled(nil, boss, player)
+                return
+            end
+        end
     end
 end
+
+RegisterPlayerEvent(7, onKillBoss)
