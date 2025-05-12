@@ -224,6 +224,7 @@ local function onKillBoss(event, player, boss)
         for _, bossId in ipairs(data.bosses) do
             if boss:GetEntry() == bossId then
                 OnBossKilled(nil, boss, player)
+                return
             end
         end
     end
