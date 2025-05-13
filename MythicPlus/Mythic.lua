@@ -199,8 +199,18 @@ local function OnBossKilled(event, creature, killer)
             local chance = MYTHIC_REWARD_CHANCE_TABLE[instanceId] or 0
             local roll = math.random()
             if roll <= (chance / 100) then
-                player:AddItem(MYSTERY_REWARD_ID, 1)
-                player:SendBroadcastMessage("|cffffff00You received a mysterious prize from the boss!|r")
+                local group = player:GetGroup()
+                if group then
+                    for _, member in ipairs(group:GetMembers()) do
+                        if member:IsInWorld() and member:GetMapId() == mapId then
+                            member:AddItem(MYSTERY_REWARD_ID, 1)
+                            member:SendBroadcastMessage("|cffffff00You received a mysterious prize from the boss!|r")
+                        end
+                    end
+                else
+                    player:AddItem(MYSTERY_REWARD_ID, 1)
+                    player:SendBroadcastMessage("|cffffff00You received a mysterious prize from the boss!|r")
+                end
             end
             break
         end
@@ -214,7 +224,16 @@ local function OnBossKilled(event, creature, killer)
             RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
             MYTHIC_LOOP_HANDLERS[instanceId] = nil
         end
-        player:SendBroadcastMessage("|cffff4444Final boss defeated. Mythic Mode ended.|r")
+local group = player:GetGroup()
+if group then
+    for _, member in ipairs(group:GetMembers()) do
+        if member:IsInWorld() and member:GetMapId() == mapId then
+            member:SendBroadcastMessage("|cffff4444Final boss defeated. Mythic Mode ended.|r")
+        end
+    end
+else
+    player:SendBroadcastMessage("|cffff4444Final boss defeated. Mythic Mode ended.|r")
+end
     end
 end
 
