@@ -1,4 +1,4 @@
-﻿print("[Mythic] Mythic.lua loaded successfully.")
+print("[Mythic] Mythic.lua loaded successfully.")
 
 dofile("Scripts/MythicPlus/MythicBosses.lua")
 
@@ -199,7 +199,7 @@ local function OnBossKilled(event, creature, killer)
             local chance = MYTHIC_REWARD_CHANCE_TABLE[instanceId] or 0
             local roll = math.random()
             if roll <= (chance / 100) then
-                player:AddItem(50274, 1)
+                player:AddItem(MYSTERY_REWARD_ID, 1)
                 player:SendBroadcastMessage("|cffffff00You received a mysterious prize from the boss!|r")
             end
             break
@@ -231,3 +231,4 @@ local function onKillBoss(event, player, boss)
 end
 
 RegisterPlayerEvent(7, onKillBoss)
+RegisterPlayerEvent(58, onKillBoss)
