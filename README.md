@@ -22,7 +22,7 @@ There are now 8 baseline affixes in the system:
 - Demonism  
 - Falling Stars  
 
-Each week, 3 affixes are randomly selected:
+Each server restart, 3 affixes are randomly selected:
 - Tier 1: 1 affix  
 - Tier 2: 2 affixes  
 - Tier 3: 3 affixes  
