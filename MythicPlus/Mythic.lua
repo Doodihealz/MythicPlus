@@ -159,7 +159,7 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
             if not seen[guid]
                 and creature:IsAlive()
                 and creature:IsInWorld()
-                and faction ~= 2 and faction ~= 3 and faction ~= 4 and faction ~= 31 and faction ~= 35 and faction ~= 1629 then
+                and faction ~= 2 and faction ~= 3 and faction ~= 4 and faction ~= 14 and faction ~= 31 and faction ~= 35 and faction ~= 188 and faction ~= 1629 and faction ~= 114 and faction ~= 35 and faction ~= 115 and faction ~= 1 then
 
                 seen[guid] = true
                 for _, spellId in ipairs(affixes) do
@@ -201,21 +201,47 @@ end
 local function AwardMythicPoints(player, tier)
     local guid = player:GetGUIDLow()
     local gain = TIER_RATING_GAIN[tier]
-    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
+    local now = os.time()
+
+    local result = CharDBQuery("SELECT total_points, claimed_tier1, claimed_tier2, claimed_tier3 FROM character_mythic_rating WHERE guid = " .. guid)
     local previous = result and result:GetUInt32(0) or 0
     local updated = math.min(previous + gain, RATING_CAP)
+
+    local claimed1 = result and result:GetUInt32(1) or 0
+    local claimed2 = result and result:GetUInt32(2) or 0
+    local claimed3 = result and result:GetUInt32(3) or 0
+
+    if tier == 1 then claimed1 = claimed1 + 1
+    elseif tier == 2 then claimed2 = claimed2 + 1
+    elseif tier == 3 then claimed3 = claimed3 + 1 end
+
     CharDBExecute(string.format([[
-        INSERT INTO character_mythic_rating (guid, total_runs, total_points)
-        VALUES (%d, 1, %d)
-        ON DUPLICATE KEY UPDATE total_runs = total_runs + 1, total_points = %d;
-    ]], guid, updated, updated))
+        INSERT INTO character_mythic_rating (guid, total_runs, total_points, claimed_tier1, claimed_tier2, claimed_tier3, last_updated)
+        VALUES (%d, 1, %d, %d, %d, %d, FROM_UNIXTIME(%d))
+        ON DUPLICATE KEY UPDATE 
+            total_runs = total_runs + 1,
+            total_points = %d,
+            claimed_tier1 = %d,
+            claimed_tier2 = %d,
+            claimed_tier3 = %d,
+            last_updated = FROM_UNIXTIME(%d);
+    ]], guid, updated, claimed1, claimed2, claimed3, now, updated, claimed1, claimed2, claimed3, now))
+
     player:SendBroadcastMessage(string.format("Tier %d key completed.\nNew Rating: %d (|cff00ff00+%d|r)", tier, updated, updated - previous))
+
     local reward = RATING_THRESHOLDS[tier]
     if reward then
         player:SendBroadcastMessage(reward.message)
         player:AddItem(reward.item, 1)
-        CharDBExecute(string.format("UPDATE character_mythic_rating SET claimed_tier%d = claimed_tier%d + 1 WHERE guid = %d;", tier, tier, guid))
         print(string.format("[Mythic] Player %d awarded Tier %d reward and emblem. Rating: %d", guid, tier, updated))
+    end
+
+    if tier == 1 then
+        player:AddItem(KEY_IDS[2], 1)
+        player:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 2 Keystone granted!")
+    elseif tier == 2 then
+        player:AddItem(KEY_IDS[3], 1)
+        player:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 3 Keystone granted!")
     end
 end
 
@@ -269,34 +295,61 @@ function Pedestal_OnGossipHello(_, player, creature)
 end
 
 function Pedestal_OnGossipSelect(_, player, _, _, intid)
-    if intid == 999 then player:GossipComplete() return end
+    if intid == 999 then 
+        player:GossipComplete()
+        return 
+    end
+
     if intid >= 100 and intid <= 103 then
         local tier = intid - 100
         local keyId = KEY_IDS[tier]
+
         if not player:HasItem(keyId) then
             player:SendBroadcastMessage("You do not have the required Tier " .. tier .. " Keystone.")
             player:GossipComplete()
             return
         end
+
         local map = player:GetMap()
         if not map or map:GetDifficulty() == 0 then
             player:SendBroadcastMessage("|cffff0000Mythic keys cannot be used in Normal mode dungeons.|r")
             player:GossipComplete()
             return
         end
+
+        local guid = player:GetGUIDLow()
+        local now = os.time()
+
+        -- Ensure character_mythic_rating entry exists and record the claimed tier
+        CharDBExecute(string.format([[
+            INSERT INTO character_mythic_rating (guid, total_runs, total_points, claimed_tier1, claimed_tier2, claimed_tier3, last_updated)
+            VALUES (%d, 0, 0, %d, %d, %d, FROM_UNIXTIME(%d))
+            ON DUPLICATE KEY UPDATE 
+                last_updated = FROM_UNIXTIME(%d);
+        ]], guid,
+            tier == 1 and 1 or 0,
+            tier == 2 and 1 or 0,
+            tier == 3 and 1 or 0,
+            now, now))
+
         local instanceId = map:GetInstanceId()
         local mapId = player:GetMapId()
         local affixes = GetAffixSet(tier)
         local affixNames = GetAffixNameSet(tier)
+
         MYTHIC_FLAG_TABLE[instanceId] = true
         MYTHIC_AFFIXES_TABLE[instanceId] = affixes
         MYTHIC_REWARD_CHANCE_TABLE[instanceId] = tier == 1 and 1.5 or tier == 2 and 2.0 or 5.0
-        local ratingQuery = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. player:GetGUIDLow())
+
+        local ratingQuery = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
         local currentRating = ratingQuery and ratingQuery:GetUInt32(0) or 0
+
         player:SendBroadcastMessage(string.format("Tier %d Keystone inserted.\nAffixes: %s\nCurrent Rating: %d", tier, affixNames, currentRating))
         player:RemoveItem(keyId, 1)
+
         ApplyAuraToNearbyCreatures(player, affixes)
         StartAuraLoop(player, instanceId, mapId, affixes, 6000)
+
         player:GossipComplete()
     end
 end
