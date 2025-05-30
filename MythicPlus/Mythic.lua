@@ -61,7 +61,7 @@ local function RollWeeklyAffixes()
             local j = math.random(i)
             shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
         end
-        -- Check Falling Stars
+        
         local hasFS = false
         for i = 1, 2 do
             if shuffled[i].name == "Falling Stars" then
@@ -149,11 +149,18 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
     local seen = {}
     local map = player:GetMap()
     if not map then return end
+
     for entry = MYTHIC_ENTRY_RANGE.start, MYTHIC_ENTRY_RANGE.stop do
         local creature = player:GetNearestCreature(MYTHIC_SCAN_RADIUS, entry)
         if creature then
             local guid = creature:GetGUIDLow()
-            if not seen[guid] and creature:IsAlive() and creature:IsInWorld() then
+            local faction = creature:GetFaction()
+
+            if not seen[guid]
+                and creature:IsAlive()
+                and creature:IsInWorld()
+                and faction ~= 2 and faction ~= 3 and faction ~= 31 and faction ~= 35 then
+
                 seen[guid] = true
                 for _, spellId in ipairs(affixes) do
                     if SHAMANISM_SPELLS[spellId] then
