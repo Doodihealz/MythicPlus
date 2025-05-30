@@ -159,7 +159,7 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
             if not seen[guid]
                 and creature:IsAlive()
                 and creature:IsInWorld()
-                and faction ~= 2 and faction ~= 3 and faction ~= 31 and faction ~= 35 then
+                and faction ~= 2 and faction ~= 3 and faction ~= 4 and faction ~= 31 and faction ~= 35 and faction ~= 1629 then
 
                 seen[guid] = true
                 for _, spellId in ipairs(affixes) do
