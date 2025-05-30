@@ -37,17 +37,35 @@ Players earn Mythic Rating and Emblems based on key tier:
 
 Rewards scale with performance and are tracked in a persistent rating system. Deaths during Mythic runs reduce rating slightly based on tier.
 
+### Rating System Explained  
+The script includes a scoring system that tracks each character’s Mythic Rating. This system is stored in the database and updates automatically.
+
+- **Starting Rating:** 0  
+- **Rating Cap:** 2000  
+- **Gains:**  
+  - Tier 1 Completion: +20  
+  - Tier 2 Completion: +40  
+  - Tier 3 Completion: +60  
+- **Losses (on death):**  
+  - Tier 1: -3 per death  
+  - Tier 2: -6 per death  
+  - Tier 3: -9 per death  
+
+Reaching certain rating thresholds grants access to tiered rewards. The player's rating is displayed when they insert a keystone and after completing a run.
+
 ### Other Features  
 - Buffs all mobs dynamically based on the affix combo  
 - Final boss kill ends Mythic mode cleanly  
 - Prevents re-use of keystone until dungeon is reset  
 - Server-only logic (no client addons or AIO needed)  
 - Easily extendable system for adding more affixes or rewards  
+- Optional global login announcement for the weekly affixes  
 
 ## Setup Instructions  
 
 ### SQL Setup  
 - Run `KeystoneItems.sql` to install the updated 3-tier keystones.  
+- Run `Character_Mythic_score.sql` on your **character database** to create the table needed for rating tracking.  
 - **Important:** Delete any old keystone item entries as they are no longer used.
 
 ### Lua Setup  
@@ -71,10 +89,15 @@ Rewards scale with performance and are tracked in a persistent rating system. De
 ## Notes  
 - If you can’t import the SQL file, create an NPC with ID `900001` manually.  
 - Items and spell IDs can be modified in the script or DB.  
-- If you rename `MythicBosses.lua`, update the path in `dofile()`.
+- If you rename `MythicBosses.lua`, update the path in `dofile()` accordingly.
 
 ## Disclaimer  
 This script is provided as-is. Make sure you understand the logic before making changes. Always back up your data.
+
+## Credits  
+**Doodihealz / Corey**  
+Special thanks to the WoW Modding Community Discord for their guidance and support.
+
 
 ## Credits  
 **Doodihealz / Corey**  
