@@ -50,30 +50,32 @@ local PRIEST_EMPOWERED_SPELLS = {
 }
 
 local WEEKLY_AFFIXES = {}
+
 local function RollWeeklyAffixes()
     math.randomseed(os.time())
-    local pool = {}
-    local fallingStarsIndex
-
-    for i, affix in ipairs(WEEKLY_AFFIX_POOL) do
-        if affix.name == "Falling Stars" then
-            fallingStarsIndex = i
-        else
-            table.insert(pool, i)
+    local valid = false
+    while not valid do
+        local shuffled = {}
+        for i = 1, #WEEKLY_AFFIX_POOL do shuffled[i] = WEEKLY_AFFIX_POOL[i] end
+        for i = #shuffled, 2, -1 do
+            local j = math.random(i)
+            shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+        end
+        -- Check Falling Stars
+        local hasFS = false
+        for i = 1, 2 do
+            if shuffled[i].name == "Falling Stars" then
+                hasFS = true
+                break
+            end
+        end
+        if not hasFS then
+            WEEKLY_AFFIXES = { shuffled[1], shuffled[2], shuffled[3] }
+            valid = true
         end
     end
-
-    for i = #pool, 2, -1 do
-        local j = math.random(i)
-        pool[i], pool[j] = pool[j], pool[i]
-    end
-
-    WEEKLY_AFFIXES = {
-        WEEKLY_AFFIX_POOL[pool[1]],
-        WEEKLY_AFFIX_POOL[pool[2]],
-        WEEKLY_AFFIX_POOL[fallingStarsIndex]
-    }
 end
+RollWeeklyAffixes()
 
 local KEY_IDS = {
     [1] = 900100,
