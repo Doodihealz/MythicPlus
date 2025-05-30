@@ -11,7 +11,7 @@ local WEEKLY_AFFIX_POOL = {
     { spell = {57662, 57621, 58738, 8515}, name = "Shamanism" },
     { spell = {43015, 43008, 43046, 57531, 12043}, name = "Magus" },
     { spell = {48161, 48066, 6346, 48168, 15286}, name = "Priest Empowered" },
-    { spell = {47241, 47893, 50589}, name = "Demonism" },
+    { spell = {47893, 50589}, name = "Demonism" },
     { spell = 53201, name = "Falling Stars" }
 }
 
