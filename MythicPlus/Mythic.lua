@@ -320,7 +320,6 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         local guid = player:GetGUIDLow()
         local now = os.time()
 
-        -- Ensure character_mythic_rating entry exists and record the claimed tier
         CharDBExecute(string.format([[
             INSERT INTO character_mythic_rating (guid, total_runs, total_points, claimed_tier1, claimed_tier2, claimed_tier3, last_updated)
             VALUES (%d, 0, 0, %d, %d, %d, FROM_UNIXTIME(%d))
@@ -376,5 +375,5 @@ RegisterPlayerEvent(3, function(_, player)
         local color = AFFIX_COLOR_MAP[affix.name] or "|cffffffff"
         table.insert(affixNames, color .. affix.name .. "|r")
     end
-    SendWorldMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(affixNames, ", "))
+    player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(affixNames, ", "))
 end)
