@@ -97,8 +97,3 @@ This script is provided as-is. Make sure you understand the logic before making 
 ## Credits  
 **Doodihealz / Corey**  
 Special thanks to the WoW Modding Community Discord for their guidance and support.
-
-
-## Credits  
-**Doodihealz / Corey**  
-Special thanks to the WoW Modding Community Discord for their guidance and support.
