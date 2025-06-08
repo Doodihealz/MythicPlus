@@ -4,6 +4,18 @@ dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.
 
 local PEDESTAL_NPC_ENTRY = 900001
 
+CreateLuaEvent(function()
+    CharDBExecute([[
+        DELETE FROM character_mythic_instance_state
+        WHERE created_at < NOW() - INTERVAL 1 DAY
+    ]])
+    print("[Mythic] Cleared stale Mythic+ instance state entries older than 24 hours.")
+end, 3600000, 0)
+
+local WHITELISTED_CREATURES = {
+    [26861] = true
+}
+
 local WEEKLY_AFFIX_POOL = {
     { spell = 8599, name = "Enrage" },
     { spell = {48441, 61301}, name = "Rejuvenating" },
@@ -145,6 +157,14 @@ local function HasShamanism()
     return false
 end
 
+local FRIENDLY_FACTIONS = {
+    [1] = true, [2] = true, [3] = true, [4] = true,
+    [6] = true, [14] = true, [31] = true, [35] = true,
+    [114] = true, [115] = true, [116] = true,
+    [188] = true, [190] = true, [1610] = true,
+    [1629] = true, [1683] = true, [1718] = true
+}
+
 local function ApplyAuraToNearbyCreatures(player, affixes)
     local seen = {}
     local map = player:GetMap()
@@ -159,9 +179,11 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
             if not seen[guid]
                 and creature:IsAlive()
                 and creature:IsInWorld()
-                and faction ~= 2 and faction ~= 3 and faction ~= 4 and faction ~= 14 and faction ~= 31 and faction ~= 35 and faction ~= 188 and faction ~= 1629 and faction ~= 114 and faction ~= 35 and faction ~= 115 and faction ~= 1 then
-
+                and not creature:IsPlayer()
+                and not FRIENDLY_FACTIONS[faction]
+            then
                 seen[guid] = true
+
                 for _, spellId in ipairs(affixes) do
                     if SHAMANISM_SPELLS[spellId] then
                         if not creature:HasAura(spellId) then
@@ -227,14 +249,30 @@ local function AwardMythicPoints(player, tier)
             last_updated = FROM_UNIXTIME(%d);
     ]], guid, updated, claimed1, claimed2, claimed3, now, updated, claimed1, claimed2, claimed3, now))
 
-    player:SendBroadcastMessage(string.format("Tier %d key completed.\nNew Rating: %d (|cff00ff00+%d|r)", tier, updated, updated - previous))
+    player:SendBroadcastMessage(string.format(
+        "Tier %d key completed.\nNew Rating: %d (|cff00ff00+%d|r)",
+        tier, updated, updated - previous
+    ))
 
-    local reward = RATING_THRESHOLDS[tier]
-    if reward then
-        player:SendBroadcastMessage(reward.message)
-        player:AddItem(reward.item, 1)
-        print(string.format("[Mythic] Player %d awarded Tier %d reward and emblem. Rating: %d", guid, tier, updated))
+    local rewardItemId = nil
+    local rewardCount = 1
+
+    if updated > 1800 then
+        rewardItemId = 49426
+        rewardCount = 2
+    elseif updated > 1000 then
+        rewardItemId = 49426
+    elseif updated > 500 then
+        rewardItemId = 47241
+    else
+        rewardItemId = 45624
     end
+
+    player:AddItem(rewardItemId, rewardCount)
+    player:SendBroadcastMessage(string.format(
+        "|cffffff00[Mythic]|r You've been awarded |cffaaff00%s x%d|r for your efforts.\nYour rating is now |cff00ff00%d|r.",
+        GetItemLink(rewardItemId), rewardCount, updated
+    ))
 
     if tier == 1 then
         player:AddItem(KEY_IDS[2], 1)
@@ -244,6 +282,7 @@ local function AwardMythicPoints(player, tier)
         player:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 3 Keystone granted!")
     end
 end
+
 
 local function PenalizeMythicPoints(player, tier)
     local guid = player:GetGUIDLow()
@@ -301,6 +340,21 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
     end
 
     if intid >= 100 and intid <= 103 then
+        local map = player:GetMap()
+        if not map then
+            player:SendBroadcastMessage("Error: No map context.")
+            player:GossipComplete()
+            return
+        end
+
+        local instanceId = map:GetInstanceId()
+
+        if MYTHIC_FLAG_TABLE[instanceId] then
+            player:SendBroadcastMessage("|cffff0000Mythic mode has already been activated in this instance.|r")
+            player:GossipComplete()
+            return
+        end
+
         local tier = intid - 100
         local keyId = KEY_IDS[tier]
 
@@ -310,7 +364,6 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
             return
         end
 
-        local map = player:GetMap()
         if not map or map:GetDifficulty() == 0 then
             player:SendBroadcastMessage("|cffff0000Mythic keys cannot be used in Normal mode dungeons.|r")
             player:GossipComplete()
@@ -331,8 +384,6 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
             tier == 3 and 1 or 0,
             now, now))
 
-        local instanceId = map:GetInstanceId()
-        local mapId = player:GetMapId()
         local affixes = GetAffixSet(tier)
         local affixNames = GetAffixNameSet(tier)
 
@@ -347,7 +398,15 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         player:RemoveItem(keyId, 1)
 
         ApplyAuraToNearbyCreatures(player, affixes)
-        StartAuraLoop(player, instanceId, mapId, affixes, 6000)
+        StartAuraLoop(player, instanceId, map:GetMapId(), affixes, 6000)
+
+        CharDBExecute(string.format([[
+            INSERT INTO character_mythic_instance_state (guid, instance_id, map_id, tier, created_at)
+            VALUES (%d, %d, %d, %d, FROM_UNIXTIME(%d))
+            ON DUPLICATE KEY UPDATE
+                tier = VALUES(tier),
+                created_at = VALUES(created_at);
+        ]], guid, instanceId, map:GetMapId(), tier, now))
 
         player:GossipComplete()
     end
@@ -376,4 +435,120 @@ RegisterPlayerEvent(3, function(_, player)
         table.insert(affixNames, color .. affix.name .. "|r")
     end
     player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(affixNames, ", "))
+end)
+
+for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
+    if data.final then
+        RegisterCreatureEvent(data.final, 4, function(_, creature, killer)
+            local map = creature:GetMap()
+            if not map then return end
+
+            local instanceId = map:GetInstanceId()
+            if not MYTHIC_FLAG_TABLE[instanceId] then return end
+
+            local affixCount = MYTHIC_AFFIXES_TABLE[instanceId] and #MYTHIC_AFFIXES_TABLE[instanceId] or 1
+            local tier = affixCount >= 4 and 3 or affixCount == 3 and 2 or 1
+
+            for _, player in pairs(map:GetPlayers() or {}) do
+                if player and player:IsInWorld() and player:IsAlive() then
+                    print("[Mythic Debug] Rewarding player: " .. player:GetName())
+                    AwardMythicPoints(player, tier)
+                    player:SendBroadcastMessage("|cff00ff00Dungeon completed! Ending Mythic Mode.|r")
+                end
+            end
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+                MYTHIC_LOOP_HANDLERS[instanceId] = nil
+            end
+
+            MYTHIC_FLAG_TABLE[instanceId] = nil
+            MYTHIC_AFFIXES_TABLE[instanceId] = nil
+            MYTHIC_REWARD_CHANCE_TABLE[instanceId] = nil
+
+            print(string.format("[Mythic] Instance %d complete. Tier %d rewards granted.", instanceId, tier))
+        end)
+    end
+end
+
+local __MYTHIC_RATING_COOLDOWN__ = {}
+
+local function OnMythicRatingCommand(event, player, command)
+    local cmd = command:lower():gsub("[#./]", "")
+    if cmd ~= "mythicrating" then return end
+
+    local guid = player:GetGUIDLow()
+    local now = os.time()
+
+    local lastUsed = __MYTHIC_RATING_COOLDOWN__[guid] or 0
+    if now - lastUsed < 300 then
+        player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes.")
+        return false
+    end
+    __MYTHIC_RATING_COOLDOWN__[guid] = now
+
+    local result = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = " .. guid)
+
+    if result then
+        local rating = result:GetUInt32(0)
+        local runs = result:GetUInt32(1)
+
+        local color
+        if rating <= 500 then
+            color = "|cff9d9d9d"
+        elseif rating <= 1000 then
+            color = "|cff1eff00"
+        elseif rating <= 1800 then
+            color = "|cff0070dd"
+        else
+            color = "|cffa335ee"
+        end
+
+        player:SendBroadcastMessage(string.format(
+            "|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", color, rating, runs
+        ))
+    else
+        player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
+    end
+
+    return false
+end
+
+RegisterPlayerEvent(42, OnMythicRatingCommand)
+
+RegisterPlayerEvent(28, function(_, player)
+    local guid = player:GetGUIDLow()
+    CreateLuaEvent(function()
+        local p = GetPlayerByGUID(guid)
+        if not p or not p:IsInWorld() then return end
+
+        local map = p:GetMap()
+        if not map then return end
+
+        local instanceId = map:GetInstanceId()
+        local mapId = map:GetMapId()
+
+       local result = CharDBQuery("SELECT tier FROM character_mythic_instance_state WHERE guid = " .. tostring(guid) .. " AND instance_id = " .. tostring(instanceId) .. " AND map_id = " .. tostring(mapId))
+        if result then
+            local tier = result:GetUInt32(0)
+            local affixes = GetAffixSet(tier)
+            local affixNames = GetAffixNameSet(tier)
+
+            MYTHIC_FLAG_TABLE[instanceId] = true
+            MYTHIC_AFFIXES_TABLE[instanceId] = affixes
+            MYTHIC_REWARD_CHANCE_TABLE[instanceId] = tier == 1 and 1.5 or tier == 2 and 2.0 or 5.0
+
+            print(string.format("[Mythic Debug] Reapplying affixes for %s (mapId: %d, instanceId: %d)", p:GetName(), mapId, instanceId))
+            p:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
+
+            ApplyAuraToNearbyCreatures(p, affixes)
+
+            if not MYTHIC_LOOP_HANDLERS[instanceId] then
+                StartAuraLoop(p, instanceId, mapId, affixes, 6000)
+                print("[Mythic Debug] Aura loop restarted.")
+            end
+        else
+            print(string.format("[Mythic Debug] No mythic instance data found for guid %d, instanceId %d", guid, instanceId))
+        end
+    end, 1500, 1)
 end)
