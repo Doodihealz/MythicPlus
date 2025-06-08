@@ -46,23 +46,25 @@ Each server restart, 3 affixes are randomly selected:
 
 Players earn Mythic Rating and Emblems based on key tier:
 
-| Tier | Reward                       |
-|------|------------------------------|
-| 1    | Emblem of Conquest (ID 45624)|
-| 2    | Emblem of Triumph (ID 47421) |
-| 3    | Emblem of Frost (ID 49426)   |
-| 4    | Emblem of Frost x2 (ID 49426)|
+## 🎁 Reward Tiers
+
+| Tier | Reward                          |
+|------|----------------------------------|
+| 1    | Emblem of Conquest (ID: 45624)  |
+| 2    | Emblem of Triumph (ID: 47421)   |
+| 3    | Emblem of Frost (ID: 49426)     |
+| 4    | Emblem of Frost ×2 (ID: 49426)  |
 
 ---
 
 ## 📊 Rating Tiers
 
-| Rating Range | Quality        |
-|--------------|----------------|
-| 1–500        | Uncommon       |
-| 501–1000     | Rare           |
-| 1001–1800    | Epic           |
-| 1801–2000    | Legendary       |
+| Rating Range | Quality    | Corresponding Reward Tier |
+|--------------|------------|----------------------------|
+| 1–500        | Uncommon   | Tier 1                     |
+| 501–1000     | Rare       | Tier 2                     |
+| 1001–1800    | Epic       | Tier 3                     |
+| 1801–2000    | Legendary  | Tier 4                     |
 
 ---
 
