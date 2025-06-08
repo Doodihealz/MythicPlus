@@ -68,6 +68,28 @@ Players earn Mythic Rating and Emblems based on key tier:
 
 ---
 
+Should you fail Mythic mode by running out of time, all buffs present from any of the affixes will immediately be removed. You will lose half of whatever rating a completed key would give. That plays out as the following:
+
+## ❌ Mythic Failure: Outcomes & Penalties
+
+Should you **fail Mythic mode** by running out of time or losing your keystone aura, the following will occur:
+
+- All affix-related buffs are removed from nearby enemies.
+- Rating is deducted equal to **half of the points** that would have been gained for that tier.
+- No rewards or new keystones will be granted.
+
+### 🔻 Rating Penalty Chart
+
+| Mythic Tier | Normal Rating Gain | Failure Penalty (−50%) |
+|-------------|--------------------|-------------------------|
+| Tier 1      | 20                 | -10                     |
+| Tier 2      | 40                 | -20                     |
+| Tier 3      | 60                 | -30                     |
+
+> Rating never drops below 0, even if the penalty would exceed your current score.
+
+---
+
 ## 🧮 Rating System Explained
 
 The script includes a scoring system that tracks each character’s Mythic Rating. This system is stored in the database and updates automatically.
