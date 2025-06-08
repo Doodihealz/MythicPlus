@@ -19,7 +19,7 @@ Mythic mode now operates through **three keystone tiers** (T1, T2, T3) instead o
 - The script dynamically applies affix combinations based on tier
 - Affixes rotate weekly, creating a fresh challenge every reset
 - No more clutter of 20+ individual keystones
-- ✅ NEW `.mythicrating` command to display your current rating!
+- NEW `.mythicrating` command to display your current rating!
 - Added a timer system based on deserter debuffs. If the debuff expires the mythic mode is marked as failed. It will persist through death. (15 minute and 30 minute timer used respectively)
 
 ---
