@@ -76,7 +76,7 @@ Should you fail Mythic mode by running out of time, all buffs present from any o
 
 ## ❌ Mythic Failure: Outcomes & Penalties
 
-Should you **fail Mythic mode** by running out of time or losing your keystone aura, the following will occur:
+Should you **fail Mythic mode** by running out of time, the following will occur:
 
 - All affix-related buffs are removed from nearby enemies.
 - Rating is deducted equal to **half of the points** that would have been gained for that tier.
