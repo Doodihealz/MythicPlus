@@ -37,7 +37,7 @@ function ScheduleMythicTimeout(player, instanceId, tier)
                 MYTHIC_LOOP_HANDLERS[instanceId] = nil
             end
         end
-    end, 10000, 0)
+    end, 5000, 0)
 
     CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
