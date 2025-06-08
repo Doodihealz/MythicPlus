@@ -1,6 +1,8 @@
 # MythicPlus
 **Eluna script for Custom Mythic+ Difficulty, Tiered Rewards, Timed runs, Ratings, and Weekly Affix Rotations**
 
+**YOU MUST MANUALLY SET THE MYTHIC BOSS SCRIPT LOCATION. dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua") PROBABLY WON'T WORK FOR YOU**
+
 ## About This Script
 This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich King* heroic dungeons using the Eluna engine. It brings scalable challenge and reward mechanics inspired by retail WoW Mythic+ into a custom private server setting.
 
