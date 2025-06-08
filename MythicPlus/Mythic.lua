@@ -489,27 +489,31 @@ local function OnMythicRatingCommand(event, player, command)
 
     local result = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = " .. guid)
 
-    if result then
-        local rating = result:GetUInt32(0)
-        local runs = result:GetUInt32(1)
+if result then
+    local rating = result:GetUInt32(0)
+    local runs   = result:GetUInt32(1)
 
-        local color
-        if rating <= 500 then
-            color = "|cff9d9d9d"
-        elseif rating <= 1000 then
-            color = "|cff1eff00"
-        elseif rating <= 1800 then
-            color = "|cff0070dd"
-        else
-            color = "|cffa335ee"
-        end
-
-        player:SendBroadcastMessage(string.format(
-            "|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", color, rating, runs
-        ))
+    local color
+    if rating <= 500 then
+        color = "|cff9d9d9d"
+    elseif rating <= 1000 then
+        color = "|cff1eff00"
+    elseif rating <= 1800 then
+        color = "|cff0070dd" 
     else
-        player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
+        color = "|cffff8000" 
     end
+
+    player:SendBroadcastMessage(string.format(
+        "|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)",
+        color, rating, runs
+    ))
+else
+    player:SendBroadcastMessage(
+        "|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking."
+    )
+end
+
 
     return false
 end
