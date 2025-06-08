@@ -495,13 +495,13 @@ if result then
 
     local color
     if rating <= 500 then
-        color = "|cff9d9d9d"
-    elseif rating <= 1000 then
         color = "|cff1eff00"
+    elseif rating <= 1000 then
+        color = "|cff0070dd"
     elseif rating <= 1800 then
-        color = "|cff0070dd" 
+        color = "|cffa335ee"
     else
-        color = "|cffff8000" 
+        color = "|cffff8000"
     end
 
     player:SendBroadcastMessage(string.format(
