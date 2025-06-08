@@ -77,6 +77,29 @@ local function RemoveAffixAurasFromNearbyCreatures(player)
     end
 end
 
+local TIER_RATING_GAIN = { [1] = 20, [2] = 40, [3] = 60 }
+local RATING_CAP = 2000
+
+local function DeductMythicRatingOnFailure(player, tier)
+    local guid = player:GetGUIDLow()
+    local gain = TIER_RATING_GAIN[tier] or 0
+    local loss = math.floor(gain / 2)
+    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
+    local current = result and result:GetUInt32(0) or 0
+    local newRating = math.max(current - loss, 0)
+
+    CharDBExecute(string.format([[
+        INSERT INTO character_mythic_rating (guid, total_points, total_runs, last_updated)
+        VALUES (%d, %d, 0, NOW())
+        ON DUPLICATE KEY UPDATE total_points = %d, last_updated = NOW();
+    ]], guid, newRating, newRating))
+
+    player:SendBroadcastMessage(string.format(
+        "|cffff0000[Mythic]|r Tier %d key failed. |cffff5555-%d rating|r (New Total: |cff00ff00%d|r)",
+        tier, current - newRating, newRating
+    ))
+end
+
 function ScheduleMythicTimeout(player, instanceId, tier)
     local duration = (tier == 1 and 15 or 30) * 60 * 1000
     local auraId = (tier == 1) and 26013 or 71041
@@ -101,6 +124,13 @@ if not p:HasAura(auraId) then
     end
 
     RemoveAffixAurasFromNearbyCreatures(p)
+
+        CharDBExecute(string.format([[
+    DELETE FROM character_mythic_instance_state
+    WHERE guid = %d AND instance_id = %d;
+]], guid, instanceId))
+
+    DeductMythicRatingOnFailure(p, tier)
 end
 
 end, 5000, 0)
@@ -411,7 +441,6 @@ local function AwardMythicPoints(player, tier)
     end
 end
 
-
 local function PenalizeMythicPoints(player, tier)
     local guid = player:GetGUIDLow()
     local loss = TIER_RATING_LOSS[tier]
@@ -657,8 +686,6 @@ else
         "|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking."
     )
 end
-
-
     return false
 end
 
