@@ -20,7 +20,7 @@ Mythic mode now operates through **three keystone tiers** (T1, T2, T3) instead o
 - Affixes rotate on server reset, which helps keep the challenge exciting!
 - No more clutter of 20+ individual keystones
 - NEW `.mythicrating` command to display your current rating!
-- Added a timer system based on deserter debuffs. If the debuff expires the mythic mode is marked as failed. It will persist through death. (15 minute and 30 minute timer used respectively)
+- Added a timer system based on deserter debuffs. If the debuff expires the mythic mode is marked as failed. The debuffs on you will persist through death. (15 minute and 30 minute timer used respectively)
 
 ---
 
