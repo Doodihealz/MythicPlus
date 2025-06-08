@@ -1,5 +1,5 @@
 # MythicPlus
-**Eluna script for Custom Mythic+ Difficulty, Tiered Rewards, and Weekly Affix Rotations**
+**Eluna script for Custom Mythic+ Difficulty, Tiered Rewards, Timed runs, Ratings, and Weekly Affix Rotations**
 
 ## About This Script
 This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich King* heroic dungeons using the Eluna engine. It brings scalable challenge and reward mechanics inspired by retail WoW Mythic+ into a custom private server setting.
@@ -16,6 +16,7 @@ Mythic mode now operates through **three keystone tiers** (T1, T2, T3) instead o
 - Affixes rotate weekly, creating a fresh challenge every reset
 - No more clutter of 20+ individual keystones
 - ✅ NEW `.mythicrating` command to display your current rating!
+- Added a timer system based on deserter debuffs. If the debuff expires the mythic mode is marked as failed. It will persist through death. (15 minute and 30 minute timer used respectively)
 
 ---
 
