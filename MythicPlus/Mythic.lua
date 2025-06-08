@@ -6,6 +6,10 @@ local PEDESTAL_NPC_ENTRY = 900001
 
 local MYTHIC_TIMER_EXPIRED = {}
 
+local MYTHIC_ENTRY_RANGE = { start = 1, stop = 60000 }
+
+local MYTHIC_KILL_LOCK = {}
+
 local MYTHIC_HOSTILE_FACTIONS = {
     [16] = true,
     [21] = true,
@@ -13,7 +17,65 @@ local MYTHIC_HOSTILE_FACTIONS = {
     
 }
 
-local MYTHIC_KILL_LOCK = {}
+local WEEKLY_AFFIX_POOL = {
+    { spell = 8599, name = "Enrage" },
+    { spell = {48441, 61301}, name = "Rejuvenating" },
+    { spell = 871, name = "Turtling" },
+    { spell = {57662, 57621, 58738, 8515}, name = "Shamanism" },
+    { spell = {43015, 43008, 43046, 57531, 12043}, name = "Magus" },
+    { spell = {48161, 48066, 6346, 48168, 15286}, name = "Priest Empowered" },
+    { spell = {47893, 50589}, name = "Demonism" },
+    { spell = 53201, name = "Falling Stars" }
+}
+
+local FRIENDLY_FACTIONS = {
+    [1] = true, [2] = true, [3] = true, [4] = true,
+    [6] = true, [14] = true, [31] = true, [35] = true,
+    [114] = true, [115] = true, [116] = true,
+    [188] = true, [190] = true, [1610] = true,
+    [1629] = true, [1683] = true, [1718] = true
+}
+
+local ALL_AFFIX_SPELL_IDS = {}
+
+for _, affix in ipairs(WEEKLY_AFFIX_POOL) do
+    if type(affix.spell) == "table" then
+        for _, spellId in ipairs(affix.spell) do
+            ALL_AFFIX_SPELL_IDS[spellId] = true
+        end
+    else
+        ALL_AFFIX_SPELL_IDS[affix.spell] = true
+    end
+end
+
+local function RemoveAffixAurasFromNearbyCreatures(player)
+    local seen = {}
+    local map = player:GetMap()
+    if not map then return end
+
+    for entry = MYTHIC_ENTRY_RANGE.start, MYTHIC_ENTRY_RANGE.stop do
+        local creature = player:GetNearestCreature(MYTHIC_SCAN_RADIUS, entry)
+        if creature then
+            local guid = creature:GetGUIDLow()
+            local faction = creature:GetFaction()
+
+            if not seen[guid]
+                and creature:IsAlive()
+                and creature:IsInWorld()
+                and not creature:IsPlayer()
+                and not FRIENDLY_FACTIONS[faction]
+            then
+                seen[guid] = true
+
+                for spellId in pairs(ALL_AFFIX_SPELL_IDS) do
+                    if creature:HasAura(spellId) then
+                        creature:RemoveAura(spellId)
+                    end
+                end
+            end
+        end
+    end
+end
 
 function ScheduleMythicTimeout(player, instanceId, tier)
     local duration = (tier == 1 and 15 or 30) * 60 * 1000
@@ -22,22 +84,26 @@ function ScheduleMythicTimeout(player, instanceId, tier)
 
     player:AddAura(auraId, player)
 
-    local checkEvent = CreateLuaEvent(function()
-        local p = GetPlayerByGUID(guid)
-        if not p or not p:IsInWorld() then return end
-        if not MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_TIMER_EXPIRED[instanceId] then return end
+local checkEvent = CreateLuaEvent(function()
+    local p = GetPlayerByGUID(guid)
+    if not p or not p:IsInWorld() then return end
+    if MYTHIC_TIMER_EXPIRED[instanceId] or not MYTHIC_FLAG_TABLE[instanceId] then return end
 
-        if not p:HasAura(auraId) then
-            MYTHIC_TIMER_EXPIRED[instanceId] = true
-            p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
-            print(string.format("[Mythic] Player %s removed aura %d — marking instance %d as failed.", p:GetName(), auraId, instanceId))
+if not p:HasAura(auraId) then
+    MYTHIC_TIMER_EXPIRED[instanceId] = true
 
-            if MYTHIC_LOOP_HANDLERS[instanceId] then
-                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
-                MYTHIC_LOOP_HANDLERS[instanceId] = nil
-            end
-        end
-    end, 5000, 0)
+    p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
+
+    local loopId = MYTHIC_LOOP_HANDLERS[instanceId]
+    if loopId then
+        RemoveEventById(loopId)
+        MYTHIC_LOOP_HANDLERS[instanceId] = nil
+    end
+
+    RemoveAffixAurasFromNearbyCreatures(p)
+end
+
+end, 5000, 0)
 
     CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
@@ -56,6 +122,7 @@ function ScheduleMythicTimeout(player, instanceId, tier)
     end, duration, 1)
 end
 
+
 CreateLuaEvent(function()
     CharDBExecute([[
         DELETE FROM character_mythic_instance_state
@@ -66,17 +133,6 @@ end, 3600000, 0)
 
 local WHITELISTED_CREATURES = {
     [26861] = true
-}
-
-local WEEKLY_AFFIX_POOL = {
-    { spell = 8599, name = "Enrage" },
-    { spell = {48441, 61301}, name = "Rejuvenating" },
-    { spell = 871, name = "Turtling" },
-    { spell = {57662, 57621, 58738, 8515}, name = "Shamanism" },
-    { spell = {43015, 43008, 43046, 57531, 12043}, name = "Magus" },
-    { spell = {48161, 48066, 6346, 48168, 15286}, name = "Priest Empowered" },
-    { spell = {47893, 50589}, name = "Demonism" },
-    { spell = 53201, name = "Falling Stars" }
 }
 
 local AFFIX_COLOR_MAP = {
@@ -209,14 +265,6 @@ local function HasShamanism()
     return false
 end
 
-local FRIENDLY_FACTIONS = {
-    [1] = true, [2] = true, [3] = true, [4] = true,
-    [6] = true, [14] = true, [31] = true, [35] = true,
-    [114] = true, [115] = true, [116] = true,
-    [188] = true, [190] = true, [1610] = true,
-    [1629] = true, [1683] = true, [1718] = true
-}
-
 local function ApplyAuraToNearbyCreatures(player, affixes)
     local seen = {}
     local map = player:GetMap()
@@ -243,6 +291,35 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
                         end
                     else
                         creature:CastSpell(creature, spellId, true)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function RemoveAffixAurasFromNearbyCreatures(player, affixes)
+    local seen = {}
+    local map = player:GetMap()
+    if not map then return end
+
+    for entry = MYTHIC_ENTRY_RANGE.start, MYTHIC_ENTRY_RANGE.stop do
+        local creature = player:GetNearestCreature(MYTHIC_SCAN_RADIUS, entry)
+        if creature then
+            local guid = creature:GetGUIDLow()
+            local faction = creature:GetFaction()
+
+            if not seen[guid]
+                and creature:IsAlive()
+                and creature:IsInWorld()
+                and not creature:IsPlayer()
+                and not FRIENDLY_FACTIONS[faction]
+            then
+                seen[guid] = true
+
+                for _, spellId in ipairs(affixes) do
+                    if creature:HasAura(spellId) then
+                        creature:RemoveAura(spellId)
                     end
                 end
             end
