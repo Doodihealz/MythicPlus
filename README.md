@@ -155,4 +155,4 @@ In `MythicBosses.lua`, define each dungeon:
 - Doodihealz / Corey
 - Special thanks to the WoW Modding Community Discord for their ongoing support and feedback.
 
-I'm open to reasonable and balanced suggestions.
+### ❕I'm open to reasonable and balanced suggestions❕
