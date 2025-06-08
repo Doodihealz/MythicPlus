@@ -1,4 +1,4 @@
-MythicBosses = {
+MYTHIC_FINAL_BOSSES = {
     [575] = { -- Utgarde Pinnacle
         bosses = {29281, 26687, 26693, 26861},
         final = 26861
