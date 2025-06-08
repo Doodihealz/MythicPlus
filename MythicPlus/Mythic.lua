@@ -1,8 +1,48 @@
-print("[Mythic] Mythic.lua loaded successfully.")
+print("[Mythic] Mythic script loaded successfully! Enjoy!")
 
 dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
 
 local PEDESTAL_NPC_ENTRY = 900001
+
+local MYTHIC_TIMER_EXPIRED = {}
+
+local MYTHIC_HOSTILE_FACTIONS = {
+    [16] = true,
+    [21] = true,
+    [1885] = true,
+    
+}
+
+local MYTHIC_KILL_LOCK = {}
+
+function ScheduleMythicTimeout(player, instanceId, tier)
+    local duration = tier == 1 and 15 * 60 * 1000 or 30 * 60 * 1000
+    local auraId = tier == 1 and 26013 or 71041
+    local guid = player:GetGUIDLow()
+
+    player:AddAura(auraId, player)
+
+    local checkEvent = CreateLuaEvent(function()
+        local p = GetPlayerByGUID(guid)
+        if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+            if not p:HasAura(auraId) then
+                MYTHIC_TIMER_EXPIRED[instanceId] = true
+                p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
+                print(string.format("[Mythic] Player %s removed aura %d — marking instance %d as failed.", p:GetName(), auraId, instanceId))
+            end
+        end
+    end, 10000, 0)
+
+    CreateLuaEvent(function()
+        local p = GetPlayerByGUID(guid)
+        if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+            MYTHIC_TIMER_EXPIRED[instanceId] = true
+            p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
+            print(string.format("[Mythic] Timer expired for player %s in instance %d.", p:GetName(), instanceId))
+        end
+        RemoveEventById(checkEvent)
+    end, duration, 1)
+end
 
 CreateLuaEvent(function()
     CharDBExecute([[
@@ -208,7 +248,6 @@ local function StartAuraLoop(player, instanceId, mapId, affixes, interval)
         if not p then return end
         if not MYTHIC_FLAG_TABLE[instanceId] then return end
         if p:GetMapId() ~= mapId then
-            p:SendBroadcastMessage("|cff8b0000Map change detected. Stopping buff.|r")
             MYTHIC_FLAG_TABLE[instanceId] = nil
             MYTHIC_AFFIXES_TABLE[instanceId] = nil
             MYTHIC_LOOP_HANDLERS[instanceId] = nil
@@ -349,6 +388,12 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
 
         local instanceId = map:GetInstanceId()
 
+        if MYTHIC_KILL_LOCK[instanceId] then
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r A creature has already been killed. Reset the dungeon to activate Mythic mode.")
+            player:GossipComplete()
+            return
+        end
+
         if MYTHIC_FLAG_TABLE[instanceId] then
             player:SendBroadcastMessage("|cffff0000Mythic mode has already been activated in this instance.|r")
             player:GossipComplete()
@@ -364,7 +409,7 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
             return
         end
 
-        if not map or map:GetDifficulty() == 0 then
+        if map:GetDifficulty() == 0 then
             player:SendBroadcastMessage("|cffff0000Mythic keys cannot be used in Normal mode dungeons.|r")
             player:GossipComplete()
             return
@@ -376,20 +421,23 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         CharDBExecute(string.format([[
             INSERT INTO character_mythic_rating (guid, total_runs, total_points, claimed_tier1, claimed_tier2, claimed_tier3, last_updated)
             VALUES (%d, 0, 0, %d, %d, %d, FROM_UNIXTIME(%d))
-            ON DUPLICATE KEY UPDATE 
-                last_updated = FROM_UNIXTIME(%d);
-        ]], guid,
+            ON DUPLICATE KEY UPDATE last_updated = FROM_UNIXTIME(%d);
+        ]],
+            guid,
             tier == 1 and 1 or 0,
             tier == 2 and 1 or 0,
             tier == 3 and 1 or 0,
-            now, now))
+            now, now
+        ))
 
         local affixes = GetAffixSet(tier)
         local affixNames = GetAffixNameSet(tier)
 
-        MYTHIC_FLAG_TABLE[instanceId] = true
-        MYTHIC_AFFIXES_TABLE[instanceId] = affixes
+        MYTHIC_FLAG_TABLE[instanceId]          = true
+        MYTHIC_AFFIXES_TABLE[instanceId]       = affixes
         MYTHIC_REWARD_CHANCE_TABLE[instanceId] = tier == 1 and 1.5 or tier == 2 and 2.0 or 5.0
+
+        ScheduleMythicTimeout(player, instanceId, tier)
 
         local ratingQuery = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
         local currentRating = ratingQuery and ratingQuery:GetUInt32(0) or 0
@@ -403,9 +451,7 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         CharDBExecute(string.format([[
             INSERT INTO character_mythic_instance_state (guid, instance_id, map_id, tier, created_at)
             VALUES (%d, %d, %d, %d, FROM_UNIXTIME(%d))
-            ON DUPLICATE KEY UPDATE
-                tier = VALUES(tier),
-                created_at = VALUES(created_at);
+            ON DUPLICATE KEY UPDATE tier = VALUES(tier), created_at = VALUES(created_at);
         ]], guid, instanceId, map:GetMapId(), tier, now))
 
         player:GossipComplete()
@@ -445,17 +491,26 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
 
             local instanceId = map:GetInstanceId()
             if not MYTHIC_FLAG_TABLE[instanceId] then return end
+            MYTHIC_TIMER_EXPIRED[instanceId] = nil
 
             local affixCount = MYTHIC_AFFIXES_TABLE[instanceId] and #MYTHIC_AFFIXES_TABLE[instanceId] or 1
             local tier = affixCount >= 4 and 3 or affixCount == 3 and 2 or 1
 
-            for _, player in pairs(map:GetPlayers() or {}) do
-                if player and player:IsInWorld() and player:IsAlive() then
-                    print("[Mythic Debug] Rewarding player: " .. player:GetName())
-                    AwardMythicPoints(player, tier)
-                    player:SendBroadcastMessage("|cff00ff00Dungeon completed! Ending Mythic Mode.|r")
-                end
+for _, player in pairs(map:GetPlayers() or {}) do
+    if player and player:IsInWorld() and player:IsAlive() then
+        if MYTHIC_TIMER_EXPIRED[instanceId] then
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r Dungeon completed, but time limit expired. No reward granted.")
+        else
+            AwardMythicPoints(player, tier)
+            player:SendBroadcastMessage("|cff00ff00Dungeon completed! Ending Mythic Mode.|r")
+
+            local auraId = tier == 1 and 26013 or 71041
+            if player:HasAura(auraId) then
+                player:RemoveAura(auraId)
             end
+        end
+    end
+end
 
             if MYTHIC_LOOP_HANDLERS[instanceId] then
                 RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
@@ -521,38 +576,55 @@ end
 RegisterPlayerEvent(42, OnMythicRatingCommand)
 
 RegisterPlayerEvent(28, function(_, player)
+    local map = player:GetMap()
+    if not map then return end
+
+    local instanceId = map:GetInstanceId()
+    local mapId = map:GetMapId()
     local guid = player:GetGUIDLow()
-    CreateLuaEvent(function()
-        local p = GetPlayerByGUID(guid)
-        if not p or not p:IsInWorld() then return end
 
-        local map = p:GetMap()
-        if not map then return end
+    local result = CharDBQuery("SELECT tier FROM character_mythic_instance_state WHERE guid = " .. guid .. " AND instance_id = " .. instanceId .. " AND map_id = " .. mapId)
+    if result then
+        local tier = result:GetUInt32(0)
+        local affixes = GetAffixSet(tier)
+        local affixNames = GetAffixNameSet(tier)
 
-        local instanceId = map:GetInstanceId()
-        local mapId = map:GetMapId()
+        MYTHIC_FLAG_TABLE[instanceId]         = true
+        MYTHIC_AFFIXES_TABLE[instanceId]      = affixes
+        MYTHIC_REWARD_CHANCE_TABLE[instanceId] = tier == 1 and 1.5 or tier == 2 and 2.0 or 5.0
 
-       local result = CharDBQuery("SELECT tier FROM character_mythic_instance_state WHERE guid = " .. tostring(guid) .. " AND instance_id = " .. tostring(instanceId) .. " AND map_id = " .. tostring(mapId))
-        if result then
-            local tier = result:GetUInt32(0)
-            local affixes = GetAffixSet(tier)
-            local affixNames = GetAffixNameSet(tier)
+        player:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
 
-            MYTHIC_FLAG_TABLE[instanceId] = true
-            MYTHIC_AFFIXES_TABLE[instanceId] = affixes
-            MYTHIC_REWARD_CHANCE_TABLE[instanceId] = tier == 1 and 1.5 or tier == 2 and 2.0 or 5.0
+        ApplyAuraToNearbyCreatures(player, affixes)
 
-            print(string.format("[Mythic Debug] Reapplying affixes for %s (mapId: %d, instanceId: %d)", p:GetName(), mapId, instanceId))
-            p:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
-
-            ApplyAuraToNearbyCreatures(p, affixes)
-
-            if not MYTHIC_LOOP_HANDLERS[instanceId] then
-                StartAuraLoop(p, instanceId, mapId, affixes, 6000)
-                print("[Mythic Debug] Aura loop restarted.")
-            end
-        else
-            print(string.format("[Mythic Debug] No mythic instance data found for guid %d, instanceId %d", guid, instanceId))
+        if not MYTHIC_LOOP_HANDLERS[instanceId] then
+            StartAuraLoop(player, instanceId, mapId, affixes, 6000)
         end
-    end, 1500, 1)
+    end
+end)
+
+RegisterPlayerEvent(7, function(_, killer, victim)
+    if not killer or not killer:IsPlayer() then return end
+    if not victim or victim:GetObjectType() ~= "Creature" then return end
+
+    local map = killer:GetMap()
+    if not map then return end
+
+    local mapId = map:GetMapId()
+    local instanceId = map:GetInstanceId()
+
+    if not MYTHIC_FINAL_BOSSES[mapId] then return end
+
+    if MYTHIC_KILL_LOCK[instanceId] then return end
+
+    local faction = victim:GetFaction()
+    if not MYTHIC_HOSTILE_FACTIONS[faction] then return end
+
+    MYTHIC_KILL_LOCK[instanceId] = true
+
+    print(string.format(
+        killer:GetName(), faction, mapId, instanceId
+    ))
+
+    killer:SendBroadcastMessage("|cffff0000[Mythic]|r You have slain a hostile enemy. Mythic mode is now locked for this dungeon run.")
 end)
