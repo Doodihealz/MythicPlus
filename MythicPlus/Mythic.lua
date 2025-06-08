@@ -16,19 +16,25 @@ local MYTHIC_HOSTILE_FACTIONS = {
 local MYTHIC_KILL_LOCK = {}
 
 function ScheduleMythicTimeout(player, instanceId, tier)
-    local duration = tier == 1 and 15 * 60 * 1000 or 30 * 60 * 1000
-    local auraId = tier == 1 and 26013 or 71041
+    local duration = (tier == 1 and 15 or 30) * 60 * 1000
+    local auraId = (tier == 1) and 26013 or 71041
     local guid = player:GetGUIDLow()
 
     player:AddAura(auraId, player)
 
     local checkEvent = CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
-        if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
-            if not p:HasAura(auraId) then
-                MYTHIC_TIMER_EXPIRED[instanceId] = true
-                p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
-                print(string.format("[Mythic] Player %s removed aura %d — marking instance %d as failed.", p:GetName(), auraId, instanceId))
+        if not p or not p:IsInWorld() then return end
+        if not MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_TIMER_EXPIRED[instanceId] then return end
+
+        if not p:HasAura(auraId) then
+            MYTHIC_TIMER_EXPIRED[instanceId] = true
+            p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
+            print(string.format("[Mythic] Player %s removed aura %d — marking instance %d as failed.", p:GetName(), auraId, instanceId))
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+                MYTHIC_LOOP_HANDLERS[instanceId] = nil
             end
         end
     end, 10000, 0)
@@ -39,7 +45,13 @@ function ScheduleMythicTimeout(player, instanceId, tier)
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
             print(string.format("[Mythic] Timer expired for player %s in instance %d.", p:GetName(), instanceId))
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+                MYTHIC_LOOP_HANDLERS[instanceId] = nil
+            end
         end
+
         RemoveEventById(checkEvent)
     end, duration, 1)
 end
