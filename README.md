@@ -58,8 +58,8 @@ Players earn Mythic Rating and Emblems based on key tier:
 
 | Rating Range | Quality        |
 |--------------|----------------|
-| 1–500        | Grey           |
-| 501–1000     | Uncommon       |
+| 1–500        | Uncommon       |
+| 501–1000     | Rare           |
 | 1001–1800    | Epic           |
 | 1801–2000    | Legendary       |
 
