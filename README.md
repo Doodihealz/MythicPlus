@@ -6,6 +6,8 @@ This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich Kin
 
 This version adds persistent dungeon state tracking via the `character_mythic_instance_state` table, allowing players to resume Mythic+ effects after re-entry. It also includes NPC whitelisting support, enabling specific creatures to receive buffs regardless of faction alignment.
 
+Logs should autoclear after 24 hours and immediately if the mythic fails due to time running out.
+
 ---
 
 ## 🔑 Revamped Key System
