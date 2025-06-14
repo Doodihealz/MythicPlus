@@ -2,15 +2,30 @@ print("[Mythic] Mythic script loaded successfully! Enjoy!")
 dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
 
 local PEDESTAL_NPC_ENTRY = 900001
-local MYTHIC_TIMER_EXPIRED, MYTHIC_KILL_LOCK, MYTHIC_DEATHS = {}, {}, {}
+
+MYTHIC_TIMER_EXPIRED = MYTHIC_TIMER_EXPIRED or {}
+MYTHIC_KILL_LOCK = MYTHIC_KILL_LOCK or {}
+MYTHIC_DEATHS = MYTHIC_DEATHS or {}
+MYTHIC_FLAG_TABLE = MYTHIC_FLAG_TABLE or {}
+MYTHIC_AFFIXES_TABLE = MYTHIC_AFFIXES_TABLE or {}
+MYTHIC_REWARD_CHANCE_TABLE = MYTHIC_REWARD_CHANCE_TABLE or {}
+MYTHIC_CHEST_SPAWNED = MYTHIC_CHEST_SPAWNED or {}
+MYTHIC_FINAL_BOSSES = MYTHIC_FINAL_BOSSES or {}
+MYTHIC_MODE_ENDED = MYTHIC_MODE_ENDED or {}
+
 local MYTHIC_ENTRY_RANGE = { start = 1, stop = 60000 }
 local MYTHIC_HOSTILE_FACTIONS = { [16] = true, [21] = true, [1885] = true }
-local FRIENDLY_FACTIONS = { [1]=true,[2]=true,[3]=true,[4]=true,[6]=true,[14]=true,[31]=true,[35]=true,[114]=true,[115]=true,[116]=true,[188]=true,[190]=true,[1610]=true,[1629]=true,[1683]=true,[1718]=true,[1770]=true }
+local FRIENDLY_FACTIONS = {
+  [1]=true, [2]=true, [3]=true, [4]=true, [6]=true, [14]=true, [31]=true, [35]=true,
+  [114]=true, [115]=true, [116]=true, [188]=true, [190]=true, [1610]=true, [1629]=true,
+  [1683]=true, [1718]=true, [1770]=true
+}
+
 local WEEKLY_AFFIX_POOL = {
-    { spell=8599, name="Enrage" }, { spell={48441,61301}, name="Rejuvenating" }, { spell=871, name="Turtling" },
-    { spell={57662,57621,58738,8515}, name="Shamanism" }, { spell={43015,43008,43046,57531,12043}, name="Magus" },
-    { spell={48161,48066,6346,48168,15286}, name="Priest Empowered" }, { spell={47893,50589}, name="Demonism" },
-    { spell=53201, name="Falling Stars" }
+  { spell=8599, name="Enrage" }, { spell={48441,61301}, name="Rejuvenating" }, { spell=871, name="Turtling" },
+  { spell={57662,57621,58738,8515}, name="Shamanism" }, { spell={43015,43008,43046,57531,12043}, name="Magus" },
+  { spell={48161,48066,6346,48168,15286}, name="Priest Empowered" }, { spell={47893,50589}, name="Demonism" },
+  { spell=53201, name="Falling Stars" }
 }
 
 local ALL_AFFIX_SPELL_IDS = {}
@@ -100,10 +115,19 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
     end
 end
 
-local function RemoveAffixAurasFromNearbyCreatures(player, affixes)
-    local map = player:GetMap(); if not map then return end
-    for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
-        if creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer() and not FRIENDLY_FACTIONS[creature:GetFaction()] then
+local CHEST_ENTRIES = { [1] = 900010, [2] = 900011, [3] = 900012 }
+
+function SpawnMythicRewardChest(x, y, z, o, mapId, instanceId, tier)
+    PerformIngameSpawn(2, CHEST_ENTRIES[tier] or CHEST_ENTRIES[1], mapId, instanceId, x, y, z, o)
+end
+
+local function RemoveAffixAurasFromAllCreatures(instanceId, map)
+    if not map then return end
+    local affixes = MYTHIC_AFFIXES_TABLE[instanceId]
+    if not affixes then return end
+
+    for _, creature in pairs(map:GetCreatures()) do
+        if creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer() then
             for _, spellId in ipairs(affixes) do
                 if creature:HasAura(spellId) then
                     creature:RemoveAura(spellId)
@@ -191,12 +215,21 @@ function ScheduleMythicTimeout(player, instanceId, tier)
         local p = GetPlayerByGUID(guid)
         if not p or not p:IsInWorld() or MYTHIC_TIMER_EXPIRED[instanceId] or not MYTHIC_FLAG_TABLE[instanceId] then return end
         if not p:HasAura(auraId) then
+            local map = p:GetMap()
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
-            local loopId = MYTHIC_LOOP_HANDLERS[instanceId]
-            if loopId then RemoveEventById(loopId) MYTHIC_LOOP_HANDLERS[instanceId] = nil end
-            RemoveAffixAurasFromNearbyCreatures(p)
-            CharDBExecute(string.format("DELETE FROM character_mythic_instance_state WHERE guid = %d AND instance_id = %d;", guid, instanceId))
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+                MYTHIC_LOOP_HANDLERS[instanceId] = nil
+            end
+
+            if map then RemoveAffixAurasFromAllCreatures(instanceId, map) end
+
+            CharDBExecute(string.format(
+                "DELETE FROM character_mythic_instance_state WHERE guid = %d AND instance_id = %d;",
+                guid, instanceId
+            ))
             DeductMythicRatingOnFailure(p, tier)
         end
     end, 5000, 0)
@@ -204,10 +237,17 @@ function ScheduleMythicTimeout(player, instanceId, tier)
     CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
         if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+            local map = p:GetMap()
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
-            print(string.format("[Mythic] Timer expired for player %s in instance %d.", p:GetName(), instanceId))
-            if MYTHIC_LOOP_HANDLERS[instanceId] then RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId]) MYTHIC_LOOP_HANDLERS[instanceId] = nil end
+            MYTHIC_MODE_ENDED[instanceId] = true
+
+            if map then RemoveAffixAurasFromAllCreatures(instanceId, map) end
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+                MYTHIC_LOOP_HANDLERS[instanceId] = nil
+            end
         end
         RemoveEventById(checkEvent)
     end, duration, 1)
@@ -264,19 +304,25 @@ RegisterPlayerEvent(3, function(_, player)
     player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: "..table.concat(affixNames, ", "))
 end)
 
-RegisterPlayerEvent(28, function(_, player)
-    local map = player:GetMap(); if not map then return end
-    local instanceId, mapId, guid = map:GetInstanceId(), map:GetMapId(), player:GetGUIDLow()
-    local result = CharDBQuery("SELECT tier FROM character_mythic_instance_state WHERE guid = "..guid.." AND instance_id = "..instanceId.." AND map_id = "..mapId)
-    if result then
-        local tier = result:GetUInt32(0)
-        local affixes = GetAffixSet(tier)
-        MYTHIC_FLAG_TABLE[instanceId], MYTHIC_AFFIXES_TABLE[instanceId], MYTHIC_REWARD_CHANCE_TABLE[instanceId] = true, affixes, tier==1 and 1.5 or tier==2 and 2.0 or 5.0
-        player:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
-        ApplyAuraToNearbyCreatures(player, affixes)
-        if not MYTHIC_LOOP_HANDLERS[instanceId] then
-            StartAuraLoop(player, instanceId, mapId, affixes, 6000)
-        end
+RegisterPlayerEvent(28, function(_, p)
+    local m = p:GetMap(); if not m then return end
+    local iid, mid, g = m:GetInstanceId(), m:GetMapId(), p:GetGUIDLow()
+    local r = CharDBQuery("SELECT tier, UNIX_TIMESTAMP(created_at) FROM character_mythic_instance_state WHERE guid="..g.." AND instance_id="..iid.." AND map_id="..mid)
+    if not r then return end
+    local t, ts = r:GetUInt32(0), r:GetUInt32(1)
+
+    if os.time() - ts > 7200 then
+        MYTHIC_MODE_ENDED[iid] = nil
+        CharDBExecute("DELETE FROM character_mythic_instance_state WHERE guid="..g.." AND instance_id="..iid.." AND map_id="..mid)
+        return
+    end
+
+    local a = GetAffixSet(t)
+    MYTHIC_FLAG_TABLE[iid], MYTHIC_AFFIXES_TABLE[iid], MYTHIC_REWARD_CHANCE_TABLE[iid] = true, a, t == 1 and 1.5 or t == 2 and 2.0 or 5.0
+    p:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
+    ApplyAuraToNearbyCreatures(p, a)
+    if not MYTHIC_LOOP_HANDLERS[iid] then
+        StartAuraLoop(p, iid, mid, a, 6000)
     end
 end)
 
@@ -299,46 +345,79 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
 end)
 
-for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
-    if data.final then
-        RegisterCreatureEvent(data.final, 4, function(_, creature)
-            local map = creature:GetMap(); if not map then return end
-            local instanceId = map:GetInstanceId()
-            if not MYTHIC_FLAG_TABLE[instanceId] then return end
-            MYTHIC_TIMER_EXPIRED[instanceId] = nil
-            local affixCount = MYTHIC_AFFIXES_TABLE[instanceId] and #MYTHIC_AFFIXES_TABLE[instanceId] or 1
-            local tier = affixCount >= 4 and 3 or affixCount == 3 and 2 or 1
-            for _, player in pairs(map:GetPlayers() or {}) do
-                if player and player:IsInWorld() and player:IsAlive() then
-                    if MYTHIC_TIMER_EXPIRED[instanceId] then
-                        player:SendBroadcastMessage("|cffff0000[Mythic]|r Dungeon completed, but time limit expired. No reward granted.")
-                    else
-                        local deaths = MYTHIC_DEATHS[instanceId] and MYTHIC_DEATHS[instanceId][player:GetGUIDLow()] or 0
-                        AwardMythicPoints(player, tier, deaths)
-                        player:SendBroadcastMessage("|cff00ff00Dungeon completed! Ending Mythic Mode.|r")
-                        local auraId = tier == 1 and 26013 or 71041
-                        if player:HasAura(auraId) then player:RemoveAura(auraId) end
-                    end
-                end
-            end
-            if MYTHIC_LOOP_HANDLERS[instanceId] then RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId]) MYTHIC_LOOP_HANDLERS[instanceId] = nil end
-            MYTHIC_FLAG_TABLE[instanceId], MYTHIC_AFFIXES_TABLE[instanceId], MYTHIC_REWARD_CHANCE_TABLE[instanceId], MYTHIC_DEATHS[instanceId] = nil, nil, nil, nil
-            print(string.format("[Mythic] Instance %d complete. Tier %d rewards granted.", instanceId, tier))
-        end)
-    end
-end
-
 RegisterPlayerEvent(7, function(_, killer, victim)
     if not killer or not killer:IsPlayer() or not victim or victim:GetObjectType() ~= "Creature" then return end
     local map = killer:GetMap(); if not map then return end
     local mapId, instanceId = map:GetMapId(), map:GetInstanceId()
+
+    if MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_MODE_ENDED[instanceId] then return end
+
     local finalData = MYTHIC_FINAL_BOSSES[mapId]
     if finalData and victim:GetEntry() == finalData.final then return end
-    if MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_KILL_LOCK[instanceId] then return end
+
     local faction = victim:GetFaction()
     if not MYTHIC_HOSTILE_FACTIONS[faction] then return end
+
     MYTHIC_KILL_LOCK[instanceId] = true
     killer:SendBroadcastMessage("|cffff0000[Mythic]|r You have slain a hostile enemy. Mythic mode is now locked for this dungeon run.")
 end)
-    killer:SendBroadcastMessage("|cffff0000[Mythic]|r You have slain a hostile enemy. Mythic mode is now locked for this dungeon run.")
-end)
+
+if not MYTHIC_CHEST_SPAWNED then MYTHIC_CHEST_SPAWNED = {} end
+
+for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
+    local bossId = data.final
+    if bossId then
+        RegisterCreatureEvent(bossId, 4, function(_, creature)
+    local map = creature:GetMap(); if not map then return end
+    local instanceId = map:GetInstanceId()
+    MYTHIC_MODE_ENDED[instanceId] = true 
+            if not MYTHIC_FLAG_TABLE[instanceId] then return end
+
+            local expired = MYTHIC_TIMER_EXPIRED[instanceId]
+            local affixes = MYTHIC_AFFIXES_TABLE[instanceId] or {}
+            local tier = (#affixes >= 4) and 3 or (#affixes == 3 and 2 or 1)
+
+            for _, player in pairs(map:GetPlayers() or {}) do
+                if player:IsAlive() and player:IsInWorld() then
+                    if expired then
+                        player:SendBroadcastMessage("|cffff0000[Mythic]|r Time expired. No rewards granted.")
+                    else
+                        local deaths = MYTHIC_DEATHS[instanceId] and MYTHIC_DEATHS[instanceId][player:GetGUIDLow()] or 0
+                        AwardMythicPoints(player, tier, deaths)
+                        local aura = tier == 1 and 26013 or 71041
+                        if player:HasAura(aura) then player:RemoveAura(aura) end
+                        player:SendBroadcastMessage("|cff00ff00Mythic+ dungeon complete! Rewards granted.")
+                    end
+                end
+            end
+
+            if not expired then
+                local x, y, z, o = creature:GetX(), creature:GetY(), creature:GetZ(), creature:GetO()
+                x, y = x - math.cos(o) * 2, y - math.sin(o) * 2
+                SpawnMythicRewardChest(x, y, z, o, creature:GetMapId(), instanceId, tier)
+            end
+
+            RemoveAffixAurasFromAllCreatures(instanceId, map)
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId]) end
+            MYTHIC_FLAG_TABLE[instanceId], MYTHIC_AFFIXES_TABLE[instanceId], MYTHIC_REWARD_CHANCE_TABLE[instanceId], MYTHIC_DEATHS[instanceId] = nil, nil, nil, nil
+        end)
+    end
+end
+
+local function ClearAffixBuffsFromNearbyEnemies(player)
+    local map = player:GetMap(); if not map then return end
+    local instanceId = map:GetInstanceId()
+    local affixes = MYTHIC_AFFIXES_TABLE[instanceId] or {}
+
+    for _, creature in pairs(map:GetCreatures()) do
+        if creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer()
+           and not FRIENDLY_FACTIONS[creature:GetFaction()] then
+            for _, spellId in ipairs(affixes) do
+                if creature:HasAura(spellId) then
+                    creature:RemoveAura(spellId)
+                end
+            end
+        end
+    end
+end
