@@ -749,16 +749,16 @@ RegisterPlayerEvent(7, function(_, killer, victim)
 
     if not MYTHIC_FINAL_BOSSES[mapId] then return end
 
+    if MYTHIC_FLAG_TABLE[instanceId] then
+        return
+    end
+
     if MYTHIC_KILL_LOCK[instanceId] then return end
 
     local faction = victim:GetFaction()
     if not MYTHIC_HOSTILE_FACTIONS[faction] then return end
 
     MYTHIC_KILL_LOCK[instanceId] = true
-
-    print(string.format(
-        killer:GetName(), faction, mapId, instanceId
-    ))
 
     killer:SendBroadcastMessage("|cffff0000[Mythic]|r You have slain a hostile enemy. Mythic mode is now locked for this dungeon run.")
 end)
