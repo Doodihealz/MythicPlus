@@ -104,14 +104,16 @@ function ScheduleMythicTimeout(player, instanceId, tier)
     local duration = (tier == 1 and 15 or 30) * 60 * 1000
     local auraId = (tier == 1) and 26013 or 71041
     local guid = player:GetGUIDLow()
+    local map = player:GetMap()
+    if not map then return end
 
     player:AddAura(auraId, player)
 
     local checkEvent = CreateLuaEvent(function()
         local p
-        for _, player in pairs(GetPlayersInWorld()) do
-            if player:GetGUIDLow() == guid then
-                p = player
+        for _, plr in pairs(map:GetPlayers()) do
+            if plr:GetGUIDLow() == guid then
+                p = plr
                 break
             end
         end
@@ -142,7 +144,14 @@ function ScheduleMythicTimeout(player, instanceId, tier)
     end, 5000, 0)
 
     CreateLuaEvent(function()
-        local p = GetPlayerByGUID(guid)
+        local p
+        for _, plr in pairs(map:GetPlayers()) do
+            if plr:GetGUIDLow() == guid then
+                p = plr
+                break
+            end
+        end
+
         if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
@@ -304,6 +313,7 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
 
     for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
         local guid = creature:GetGUIDLow()
+
         if not seen[guid]
             and creature:IsAlive()
             and creature:IsInWorld()
@@ -315,6 +325,7 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
             )
         then
             seen[guid] = true
+
             for _, spellId in ipairs(affixes) do
                 if type(spellId) == "number" and not creature:HasAura(spellId) then
                     local success = creature:CastSpell(creature, spellId, true)
@@ -350,13 +361,25 @@ end
 
 local function StartAuraLoop(player, instanceId, mapId, affixes, interval)
     local guid = player:GetGUIDLow()
+    local map = player:GetMap()
+    if not map then return end
+
     if MYTHIC_LOOP_HANDLERS[instanceId] then
         RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
     end
+
     local eventId = CreateLuaEvent(function()
-        local p = GetPlayerByGUID(guid)
-        if not p then return end
+        local p
+        for _, plr in pairs(map:GetPlayers()) do
+            if plr:GetGUIDLow() == guid then
+                p = plr
+                break
+            end
+        end
+
+        if not p or not p:IsInWorld() then return end
         if not MYTHIC_FLAG_TABLE[instanceId] then return end
+
         if p:GetMapId() ~= mapId then
             MYTHIC_FLAG_TABLE[instanceId] = nil
             MYTHIC_AFFIXES_TABLE[instanceId] = nil
@@ -364,8 +387,10 @@ local function StartAuraLoop(player, instanceId, mapId, affixes, interval)
             MYTHIC_REWARD_CHANCE_TABLE[instanceId] = nil
             return
         end
+
         ApplyAuraToNearbyCreatures(p, affixes)
-    end, interval, 0)
+    end, interval or 5000, 0)
+
     MYTHIC_LOOP_HANDLERS[instanceId] = eventId
 end
 
