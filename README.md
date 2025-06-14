@@ -9,8 +9,7 @@ Info for how to make the Keystone npc. My table is far different than what yours
 - name: Mythic Advisor
 - subname: The Keystone Exchanger
 - IconName: Speak
-
-Display ID: 14888
+- Display ID: 14888
 
 ## About This Script
 This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich King* heroic dungeons using the Eluna engine. It brings scalable challenge and reward mechanics inspired by retail WoW Mythic+ into a custom private server setting.
