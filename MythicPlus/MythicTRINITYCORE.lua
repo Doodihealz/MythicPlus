@@ -631,7 +631,7 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
             local tier = affixCount >= 4 and 3 or affixCount == 3 and 2 or 1
 
 for _, player in pairs(map:GetPlayers() or {}) do
-    if player and player:IsInWorld() and player:IsAlive() then
+    if player and type(player.GetGUIDLow) == "function" and player:IsInWorld() and player:IsAlive() then
         if MYTHIC_TIMER_EXPIRED[instanceId] then
             player:SendBroadcastMessage("|cffff0000[Mythic]|r Dungeon completed, but time limit expired. No reward granted.")
         else
