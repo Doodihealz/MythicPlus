@@ -421,3 +421,13 @@ local function ClearAffixBuffsFromNearbyEnemies(player)
         end
     end
 end
+
+RegisterPlayerEvent(3, function(_, player)
+    local affixNames = {}
+    for i, affix in ipairs(WEEKLY_AFFIXES) do
+        local color = AFFIX_COLOR_MAP[affix.name] or "|cffffffff"
+        table.insert(affixNames, color .. affix.name .. "|r")
+    end
+    local msg = "|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(affixNames, ", ")
+    player:SendBroadcastMessage(msg)
+end)
