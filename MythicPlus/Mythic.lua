@@ -1,4 +1,4 @@
-ic] Mythic script loaded successfully! Enjoy!")
+print("[Mythic] Mythic script loaded successfully! Enjoy!")
 
 dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
 
