@@ -33,7 +33,8 @@ local FRIENDLY_FACTIONS = {
     [6] = true, [14] = true, [31] = true, [35] = true,
     [114] = true, [115] = true, [116] = true,
     [188] = true, [190] = true, [1610] = true,
-    [1629] = true, [1683] = true, [1718] = true
+    [1629] = true, [1683] = true, [1718] = true,
+    [1770] = true
 }
 
 local ALL_AFFIX_SPELL_IDS = {}
