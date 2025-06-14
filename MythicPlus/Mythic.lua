@@ -1,4 +1,4 @@
-print("[Mythic] Mythic script loaded successfully! Enjoy!")
+ic] Mythic script loaded successfully! Enjoy!")
 
 dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
 
@@ -152,7 +152,6 @@ end, 5000, 0)
     end, duration, 1)
 end
 
-
 CreateLuaEvent(function()
     CharDBExecute([[
         DELETE FROM character_mythic_instance_state
@@ -160,10 +159,6 @@ CreateLuaEvent(function()
     ]])
     print("[Mythic] Cleared stale Mythic+ instance state entries older than 24 hours.")
 end, 3600000, 0)
-
-local WHITELISTED_CREATURES = {
-    [26861] = true
-}
 
 local AFFIX_COLOR_MAP = {
     ["Enrage"] = "|cffff0000",
@@ -240,7 +235,7 @@ local ICONS = {
 }
 
 local MYSTERY_REWARD_ID = 50274
-local MYTHIC_SCAN_RADIUS = 240
+local MYTHIC_SCAN_RADIUS = 500
 local MYTHIC_ENTRY_RANGE = { start = 1, stop = 60000 }
 
 local RATING_THRESHOLDS = {
@@ -296,31 +291,29 @@ local function HasShamanism()
 end
 
 local function ApplyAuraToNearbyCreatures(player, affixes)
-    local seen = {}
     local map = player:GetMap()
     if not map then return end
 
-    for entry = MYTHIC_ENTRY_RANGE.start, MYTHIC_ENTRY_RANGE.stop do
-        local creature = player:GetNearestCreature(MYTHIC_SCAN_RADIUS, entry)
-        if creature then
-            local guid = creature:GetGUIDLow()
-            local faction = creature:GetFaction()
+    local seen = {}
 
-            if not seen[guid]
-                and creature:IsAlive()
-                and creature:IsInWorld()
-                and not creature:IsPlayer()
-                and not FRIENDLY_FACTIONS[faction]
-            then
-                seen[guid] = true
-
-                for _, spellId in ipairs(affixes) do
-                    if SHAMANISM_SPELLS[spellId] then
-                        if not creature:HasAura(spellId) then
-                            creature:CastSpell(creature, spellId, true)
-                        end
-                    else
-                        creature:CastSpell(creature, spellId, true)
+    for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
+        local guid = creature:GetGUIDLow()
+        if not seen[guid]
+            and creature:IsAlive()
+            and creature:IsInWorld()
+            and not creature:IsPlayer()
+            and (
+                not FRIENDLY_FACTIONS[creature:GetFaction()]
+                or creature:GetEntry() == 26861
+                or creature:GetName() == "King Ymiron"
+            )
+        then
+            seen[guid] = true
+            for _, spellId in ipairs(affixes) do
+                if type(spellId) == "number" and not creature:HasAura(spellId) then
+                    local success = creature:CastSpell(creature, spellId, true)
+                    if not success then
+                        creature:AddAura(spellId, creature)
                     end
                 end
             end
@@ -329,33 +322,25 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
 end
 
 local function RemoveAffixAurasFromNearbyCreatures(player, affixes)
-    local seen = {}
     local map = player:GetMap()
     if not map then return end
 
-    for entry = MYTHIC_ENTRY_RANGE.start, MYTHIC_ENTRY_RANGE.stop do
-        local creature = player:GetNearestCreature(MYTHIC_SCAN_RADIUS, entry)
-        if creature then
-            local guid = creature:GetGUIDLow()
-            local faction = creature:GetFaction()
-
-            if not seen[guid]
-                and creature:IsAlive()
-                and creature:IsInWorld()
-                and not creature:IsPlayer()
-                and not FRIENDLY_FACTIONS[faction]
-            then
-                seen[guid] = true
-
-                for _, spellId in ipairs(affixes) do
-                    if creature:HasAura(spellId) then
-                        creature:RemoveAura(spellId)
-                    end
+    for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
+        local faction = creature:GetFaction()
+        if creature:IsAlive()
+            and creature:IsInWorld()
+            and not creature:IsPlayer()
+            and not FRIENDLY_FACTIONS[faction]
+        then
+            for _, spellId in ipairs(affixes) do
+                if creature:HasAura(spellId) then
+                    creature:RemoveAura(spellId)
                 end
             end
         end
     end
 end
+
 
 local function StartAuraLoop(player, instanceId, mapId, affixes, interval)
     local guid = player:GetGUIDLow()
@@ -686,6 +671,8 @@ else
         "|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking."
     )
 end
+
+
     return false
 end
 
