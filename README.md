@@ -3,6 +3,15 @@
 
 **YOU MUST MANUALLY SET THE MYTHIC BOSS SCRIPT LOCATION. dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua") PROBABLY WON'T WORK FOR YOU**
 
+Info for how to make the Keystone npc. My table is far different than what yours is and the insert probably won't work.
+
+NPC ID: 900001
+name: Mythic Advisor
+subname: The Keystone Exchanger
+IconName: Speak
+
+Display ID: 14888
+
 ## About This Script
 This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich King* heroic dungeons using the Eluna engine. It brings scalable challenge and reward mechanics inspired by retail WoW Mythic+ into a custom private server setting.
 
