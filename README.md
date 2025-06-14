@@ -5,10 +5,10 @@
 
 Info for how to make the Keystone npc. My table is far different than what yours is and the insert probably won't work.
 
-NPC ID: 900001
-name: Mythic Advisor
-subname: The Keystone Exchanger
-IconName: Speak
+- NPC ID: 900001
+- name: Mythic Advisor
+- subname: The Keystone Exchanger
+- IconName: Speak
 
 Display ID: 14888
 
