@@ -5,6 +5,8 @@
 
 Info for how to make the Keystone npc. My table is far different than what yours is and the insert probably won't work.
 
+Download your corresponding version of the script with your corresponding core. Trinitycore script for trinitycore eluna, azerothcore script for azerothcore.
+
 - NPC ID: 900001
 - name: Mythic Advisor
 - subname: The Keystone Exchanger
