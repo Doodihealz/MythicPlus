@@ -9,16 +9,16 @@ Supports timed runs, weekly affixes, rating progression, loot chests, rating pen
 
 ## 🗃️ SQL Setup (Character DB)
 
-Run these SQL files on your **character database**:
+Run these SQL files on the **appropriate databases**:
 
-| File Name                   | Purpose                                             |
-|-----------------------------|-----------------------------------------------------|
-| `Chestloot.sql`             | Defines item rewards for each Mythic+ tier chest    |
-| `Chests.sql`                | Adds chest **GameObjects** (not NPCs) by tier       |
-| `KeystoneDrops.sql`         | Configures keystone drops from the chests           |
-| `KeystoneItems.sql`         | Adds keystone items for Tier 1, 2, and 3            |
-| `Character_Mythic_score.sql`| Tracks player Mythic+ rating and run history        |
-| `mythic_instance_state.sql` | Stores persistent Mythic+ state across sessions     |
+| File Name                    | Purpose                                                | Target DB   |
+|-----------------------------|--------------------------------------------------------|-------------|
+| `Chestloot.sql`             | Defines item rewards for each Mythic+ tier chest       | world       |
+| `Chests.sql`                | Adds chest **GameObjects** (not NPCs) by tier          | world       |
+| `KeystoneDrops.sql`         | Configures keystone drops from the chests              | world       |
+| `KeystoneItems.sql`         | Adds keystone items for Tier 1, 2, and 3               | world       |
+| `Character_Mythic_score.sql`| Tracks player Mythic+ rating and run history           | character   |
+| `mythic_instance_state.sql` | Stores persistent Mythic+ state across sessions        | character   |
 
 ### 2. 📁 Lua Scripts
 Place in your server’s Lua scripts folder:
