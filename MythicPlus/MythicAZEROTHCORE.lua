@@ -488,20 +488,6 @@ RegisterPlayerEvent(3, function(_, player)
     player:SendBroadcastMessage(msg)
 end)
 
-RegisterPlayerEvent(18, function(_, player, msg, _, _)
-    local guid = player:GetGUIDLow()
-    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
-    if result then
-        local rating = result:GetUInt32(0)
-        if rating >= 1801 then
-            local name = player:GetName()
-            local customName = "{star}" .. name
-            SendWorldMessage(string.format("[%s] %s", customName, msg))
-            return false
-        end
-    end
-end)
-
 __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
 __MYTHIC_RESET_PENDING__ = __MYTHIC_RESET_PENDING__ or {}
 
