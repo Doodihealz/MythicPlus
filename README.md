@@ -118,7 +118,6 @@ Players receive their next-tier keystone **from the chest** (T1 → T2, T2 → T
 
 - **Starts at**: 0  
 - **Caps at**: 2000
-- **When you earn legendary rating (1801-2000) a gold star will display next to your name. Indicating your mastery ⭐**
 - **Progression**:
   - Tier 1: +20 rating
   - Tier 2: +40 rating
