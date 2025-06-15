@@ -1,197 +1,198 @@
-# MythicPlus
-**Eluna script for Custom Mythic+ Difficulty, Tiered Rewards, Timed runs, Ratings, and Weekly Affix Rotations**
+# Mythic+ Eluna Script for WotLK
 
-**YOU MUST MANUALLY SET THE MYTHIC BOSS SCRIPT LOCATION. dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua") PROBABLY WON'T WORK FOR YOU**
-
-Info for how to make the Keystone npc. My table is far different than what yours is and the insert probably won't work.
-
-Download your corresponding version of the script with your corresponding core. Trinitycore script for trinitycore eluna, azerothcore script for azerothcore.
-
-- NPC ID: 900001
-- name: Mythic Advisor
-- subname: The Keystone Exchanger
-- IconName: Speak
-- Display ID: 14888
-
-## About This Script
-This is an advanced Mythic+ style Lua script tailored for *Wrath of the Lich King* heroic dungeons using the Eluna engine. It brings scalable challenge and reward mechanics inspired by retail WoW Mythic+ into a custom private server setting.
-
-This version adds persistent dungeon state tracking via the `character_mythic_instance_state` table, allowing players to resume Mythic+ effects after re-entry. It also includes NPC whitelisting support, enabling specific creatures to receive buffs regardless of faction alignment.
-
-Logs should autoclear after 24 hours and immediately if the mythic fails due to time running out.
+A full-featured, Mythic+ style challenge system for Eluna-based Wrath of the Lich King private servers.  
+Supports timed runs, weekly affixes, rating progression, loot chests, rating penalties, and a custom keystone exchange NPC.
 
 ---
 
-## 🔑 Revamped Key System
-Mythic mode now operates through **three keystone tiers** (T1, T2, T3) instead of multiple affix combinations requiring separate keys. This means:
+## ⚙️ Setup Instructions
 
-- Only 3 keystones are needed (one per tier)
-- The script dynamically applies affix combinations based on tier
-- Affixes rotate on server reset, which helps keep the challenge exciting!
-- No more clutter of 20+ individual keystones
-- NEW `.mythicrating` command to display your current rating!
-- Added a timer system based on deserter debuffs. If the debuff expires the mythic mode is marked as failed. The debuffs on you will persist through death. (15 minute and 30 minute timer used respectively)
+## 🗃️ SQL Setup (Character DB)
 
----
+Run these SQL files on your **character database**:
 
-## 🌪️ Affix Pool Expanded
-There are now **8 baseline affixes** in the system:
+| File Name                   | Purpose                                             |
+|-----------------------------|-----------------------------------------------------|
+| `Chestloot.sql`             | Defines item rewards for each Mythic+ tier chest    |
+| `Chests.sql`                | Adds chest **GameObjects** (not NPCs) by tier       |
+| `KeystoneDrops.sql`         | Configures keystone drops from the chests           |
+| `KeystoneItems.sql`         | Adds keystone items for Tier 1, 2, and 3            |
+| `Character_Mythic_score.sql`| Tracks player Mythic+ rating and run history        |
+| `mythic_instance_state.sql` | Stores persistent Mythic+ state across sessions     |
 
-- Enrage  
-- Rejuvenating  
-- Turtling  
-- Shamanism  
-- Magus  
-- Priest Empowered  
-- Demonism  
-- Falling Stars
+### 2. 📁 Lua Scripts
+Place in your server’s Lua scripts folder:
+- `Mythic.lua` (this file)
+- `MythicBosses.lua` (define dungeon maps, boss IDs, and final boss)
 
-Each server restart, 3 affixes are randomly selected:
+Make sure your `dofile()` points to the correct location:
+```lua
+dofile(".../MythicBosses.lua")
+```
 
-- **Tier 1**: 1 affix  
-- **Tier 2**: 2 affixes  
-- **Tier 3**: 3 affixes
-
-> Affixes can be edited or expanded in the `WEEKLY_AFFIX_POOL` table in `Mythic.lua`.
-
----
-
-## 🏅 Tiered Rewards System
-
-Players earn Mythic Rating and Emblems based on key tier:
-
-## 🎁 Reward Tiers
-
-| Tier | Reward                          |
-|------|----------------------------------|
-| 1    | Emblem of Conquest (ID: 45624)  |
-| 2    | Emblem of Triumph (ID: 47421)   |
-| 3    | Emblem of Frost (ID: 49426)     |
-| 4    | Emblem of Frost ×2 (ID: 49426)  |
+### 3. 🧍 Keystone NPC (Manual or SQL)
+- **NPC Entry**: `900001`
+- **Name**: Mythic Advisor  
+- **Subname**: The Keystone Exchanger  
+- **Display ID**: `14888`  
+- **IconName**: `Speak`
 
 ---
 
-## 📊 Rating Tiers
+## 🔁 Weekly Affix System
 
-| Rating Range | Quality    | Corresponding Reward Tier |
-|--------------|------------|----------------------------|
-| 1–500        | Uncommon   | Tier 1                     |
-| 501–1000     | Rare       | Tier 2                     |
-| 1001–1800    | Epic       | Tier 3                     |
-| 1801–2000    | Legendary  | Tier 4                     |
+Affixes rotate each server restart:
 
----
+| Tier | Affixes Active |
+|------|----------------|
+| 1    | 1 Affix        |
+| 2    | 2 Affixes      |
+| 3    | 3 Affixes      |
 
-Should you fail Mythic mode by running out of time, all buffs present from any of the affixes will immediately be removed. You will lose half of whatever rating a completed key would give. That plays out as the following:
+Edit `WEEKLY_AFFIX_POOL` to modify or expand the affix set.  
+Buffs are applied dynamically to all eligible enemy creatures.
 
-## ❌ Mythic Failure: Outcomes & Penalties
+### 🌀 Affix Tiering System
 
-Should you **fail Mythic mode** by running out of time, the following will occur:
+Affixes are split into three distinct **difficulty tiers**. One affix from each tier is randomly selected at server start:
 
-- All affix-related buffs are removed from nearby enemies.
-- Rating is deducted equal to **half of the points** that would have been gained for that tier.
-- No rewards or new keystones will be granted.
+| Affix Tier | Description                                      |
+|------------|--------------------------------------------------|
+| Tier 1     | Low-impact buffs (healing, regen, mobility)      |
+| Tier 2     | Moderate-impact mechanics (defense, burst)       |
+| Tier 3     | High-impact effects (scaling, complex mechanics) |
 
-### 🔻 Rating Penalty Chart
+When Mythic+ is activated:
 
-| Mythic Tier | Normal Rating Gain | Failure Penalty (−50%) |
-|-------------|--------------------|-------------------------|
-| Tier 1      | 20                 | -10                     |
-| Tier 2      | 40                 | -20                     |
-| Tier 3      | 60                 | -30                     |
+- **Tier 1 keys** apply a Tier 1 affix  
+- **Tier 2 keys** apply Tier 1 + Tier 2 affixes  
+- **Tier 3 keys** apply all three tiers of affixes  
 
-> Rating never drops below 0, even if the penalty would exceed your current score.
+> Each week's affix set is randomly selected — 1 per tier — from the defined `WEEKLY_AFFIX_POOL`.
 
----
+### 🧪 Affix Tier Table
 
-## 🧮 Rating System Explained
-
-The script includes a scoring system that tracks each character’s Mythic Rating. This system is stored in the database and updates automatically.
-
-- **Starting Rating**: 0  
-- **Rating Cap**: 2000  
-
-### ✅ Rating Gains:
-- Tier 1 Completion: +20  
-- Tier 2 Completion: +40  
-- Tier 3 Completion: +60  
-
-### ❌ Rating Losses (on death):
-- Tier 1: -3 per death  
-- Tier 2: -6 per death  
-- Tier 3: -9 per death  
-
-Players receive tiered rewards as they hit milestones. Current rating is shown when a keystone is used and when a dungeon is completed.
+| Tier | Affix Name         |
+|------|--------------------|
+| 1    | Rejuvenating       |
+| 1    | Demonism           |
+| 1    | Resistant          |
+|------|--------------------|
+| 2    | Turtling           |
+| 2    | Priest Empowered   |
+| 2    | Falling Stars      |
+|------|--------------------|
+| 3    | Enrage             |
+| 3    | Rallying           |
+| 3    | Consecrated        |
 
 ---
 
-## ⚙️ Other Features
+## 🔑 Keystone Tiers
 
-- Buffs all mobs dynamically based on affix combo  
-- Final boss kill ends Mythic mode and cleans up instance state  
-- Supports persistent re-entry: buffs resume even after logout or wipe  
-- Prevents re-use of keystone until dungeon is reset  
-- Server-only logic (no AIO, addons, or patches required)  
-- Clean, extendable code for adding more affixes or features  
-- Global affix announcement on login (optional)  
-- Automatic cleanup: stale instance data removed every hour after 24h
+| Tier | Keystone Item ID | Timer (Debuff-Based) | Affix Count |
+|------|------------------|----------------------|-------------|
+| 1    | 900100           | 15 minutes           | 1           |
+| 2    | 900101           | 30 minutes           | 2           |
+| 3    | 900102           | 30 minutes           | 3           |
 
----
-
-## 🧰 Setup Instructions
-
-### 🗃️ SQL Setup
-
-- `KeystoneItems.sql` → Adds 3-tier keystone items  
-- `Character_Mythic_score.sql` → Adds player rating tracking table  
-- `mythic_instance_state.sql` → Adds persistent instance state tracking table
-
-> These should be executed on your **character database**.
+Mythic+ is initiated by using a keystone at the NPC.  
+Buffs and effects persist through relogs and re-entries.
 
 ---
 
-### 🧠 Lua Setup
+## 🏅 Reward System
 
-Place these files in your server's Lua script directory:
+| Tier | Reward                            |
+|------|-----------------------------------|
+| 1    | Emblem of Conquest ×1 (45624)     |
+| 2    | Emblem of Triumph ×1 (47421)      |
+| 3    | Emblem of Frost ×1 (49426)        |
+| 4    | Emblem of Frost ×2 (49426)        |
 
-- `Mythic.lua` – Core system logic  
-- `MythicBosses.lua` – Boss NPC IDs and final boss definitions  
-
-Ensure the `dofile(".../MythicBosses.lua")` path is correct based on your directory structure.
-
----
-
-### 🧟 Boss Configuration
-
-In `MythicBosses.lua`, define each dungeon:
-
-- `mapId`  
-- A list of boss creature IDs  
-- Which creature is the **final boss**
+Players receive their next-tier keystone **from the chest** (T1 → T2, T2 → T3).
 
 ---
 
-### 🎨 Customize Affixes
+## 📊 Mythic Rating System
 
-- Edit `WEEKLY_AFFIX_POOL` in `Mythic.lua` to add/remove affixes  
-- Use `AFFIX_COLOR_MAP` to customize display colors  
+- **Starts at**: 0  
+- **Caps at**: 2000
+- **When you earn legendary rating (1801-2000) a gold star will display next to your name. Indicating your mastery ⭐**
+- **Progression**:
+  - Tier 1: +20 rating
+  - Tier 2: +40 rating
+  - Tier 3: +60 rating
+
+### 💀 Penalties
+
+| Tier | On Death (per) | On Fail (Timeout) |
+|------|----------------|-------------------|
+| 1    | −3             | −10               |
+| 2    | −6             | −20               |
+| 3    | −9             | −30               |
+
+Rating can’t fall below 0.  
+No rewards if the timer expires. All buffs are removed.
 
 ---
 
-### 🔧 Optional Config
+## 🎁 Mythic Chest Loot
 
-- Toggle weekly affix announcement on player login with a true/false flag.
+- A chest spawns near the final boss upon completion
+- Chest tier matches the completed key level:
+  - T1: `900010`
+  - T2: `900011`
+  - T3: `900012`
+- Approx. **25 custom loot items per tier**
+- **Tier 3 chests** have a **1% chance** to drop **Invincible's Reins (ID: 50818)**
 
-### 📝 Notes
-- If you can’t import SQL files, manually create an NPC with entry 900001
-- Items and spell IDs can be modified freely in the script or database
-- If you rename MythicBosses.lua, update the path in dofile()
+---
 
-### ⚠️ Disclaimer
-- This script is provided as-is. Always back up your server and database before applying changes. Modify with understanding.
+## 📘 Commands
 
-### 👑 Credits
-- Doodihealz / Corey
-- Special thanks to the WoW Modding Community Discord for their ongoing support and feedback.
+### Player Commands
 
-### ❕I'm open to reasonable and balanced suggestions❕
+| Command         | Description                                |
+|-----------------|--------------------------------------------|
+| `.mythicrating` | Show current Mythic Rating & run count     |
+| `.mythichelp`   | Displays list of Mythic+ commands          |
+
+### GM-Only
+
+| Command                  | Description                                |
+|--------------------------|--------------------------------------------|
+| `.mythicreset`           | Initiate global rating reset (confirmation required) |
+| `.mythicreset confirm`   | Confirm global rating reset within 30s     |
+
+---
+
+## 🧠 Internal Features
+
+- Buffs hostile mobs based on affix set
+- Auto-detects kill activity and locks keystone use until reset
+- Saves persistent Mythic+ state for each player+instance
+- Handles aura removal on failure or wipe
+- Rating table is updated on boss kill or fail
+- Resumes affix logic on re-login or zone-in
+- Global affix announcement on login (toggleable)
+- Death counter and timeout logic included
+- Logs auto-clean up every hour (after 24h)
+
+---
+
+## 🧰 Customization Tips
+
+- 🔧 **Add Affixes**: Edit `WEEKLY_AFFIX_POOL`
+- 🎨 **Color Coding**: Modify `AFFIX_COLOR_MAP`
+- 🧟 **Whitelist NPCs**: Add by creature ID or name
+- 🗝️ **Change Key IDs**: Update `KEY_IDS` in Lua
+- 📦 **Chest IDs**: Change via `CHEST_ENTRIES` table
+- 🐎 **Invincible Drop**: Defined in chest loot logic (Tier 3, 1% drop)
+
+---
+
+## 👑 Credits
+
+- **Doodihealz / Corey**
+- With support from the WoW Modding Community Discord
