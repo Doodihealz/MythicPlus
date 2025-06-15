@@ -7,7 +7,7 @@ Supports timed runs, weekly affixes, rating progression, loot chests, rating pen
 
 ## ⚙️ Setup Instructions
 
-## 🗃️ SQL Setup (Character DB)
+## 🗃️ SQL Setup
 
 Run these SQL files on the **appropriate databases**:
 
