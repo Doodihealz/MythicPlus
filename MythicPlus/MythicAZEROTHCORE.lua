@@ -22,41 +22,45 @@ local FRIENDLY_FACTIONS = {
 }
 
 local WEEKLY_AFFIX_POOL = {
-  { spell=8599, name="Enrage" }, { spell={48441,61301}, name="Rejuvenating" }, { spell=871, name="Turtling" },
-  { spell={57662,57621,58738,8515}, name="Shamanism" }, { spell={43015,43008,43046,57531,12043}, name="Magus" },
-  { spell={48161,48066,6346,48168,15286}, name="Priest Empowered" }, { spell={47893,50589}, name="Demonism" },
-  { spell=53201, name="Falling Stars" }
+    [1] = {
+        {spell={48441,61301},name="Rejuvenating"},
+        {spell={47893,50589},name="Demonism"},
+        {spell={43010,43024,43012},name="Resistant"}
+    },
+    [2] = {
+        {spell=871,name="Turtling"},
+        {spell={48161,48066,6346,48168,15286},name="Priest Empowered"},
+        {spell=53201,name="Falling Stars"}
+    },
+    [3] = {
+        {spell=8599,name="Enrage"},
+        {spell={47436,53138,57623},name="Rallying"},
+        {spell={53385,48819},name="Consecrated"}
+    }
 }
 
-local ALL_AFFIX_SPELL_IDS = {}
-for _, affix in ipairs(WEEKLY_AFFIX_POOL) do
-    local spells = type(affix.spell) == "table" and affix.spell or { affix.spell }
-    for _, id in ipairs(spells) do ALL_AFFIX_SPELL_IDS[id] = true end
-end
-
-local AFFIX_COLOR_MAP = {
-    ["Enrage"]="|cffff0000", ["Rejuvenating"]="|cff00ff00", ["Turtling"]="|cffffff00",
-    ["Shamanism"]="|cffa335ee", ["Magus"]="|cff3399ff", ["Priest Empowered"]="|cffcccccc",
-    ["Demonism"]="|cff8b0000", ["Falling Stars"]="|cff66ccff"
+local AFFIX_COLOR_MAP, ALL_AFFIX_SPELL_IDS = {}, {}
+local colorMap = {
+    Enrage="|cffff0000", Turtling="|cffffff00", Rejuvenating="|cff00ff00",
+    Falling_Stars="|cff66ccff", ["Priest Empowered"]="|cffcccccc",
+    Demonism="|cff8b0000", Consecrated="|cffffcc00",
+    Resistant="|cffb0c4de", Rallying="|cffff8800"
 }
 
-local WEEKLY_AFFIXES = {}
-local function RollWeeklyAffixes()
-    math.randomseed(os.time())
-    local valid = false
-    while not valid do
-        local shuffled = { table.unpack(WEEKLY_AFFIX_POOL) }
-        for i = #shuffled, 2, -1 do
-            local j = math.random(i)
-            shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-        end
-        if not (shuffled[1].name == "Falling Stars" or shuffled[2].name == "Falling Stars") then
-            WEEKLY_AFFIXES = { shuffled[1], shuffled[2], shuffled[3] }
-            valid = true
-        end
+for _, tier in pairs(WEEKLY_AFFIX_POOL) do
+    for _, affix in ipairs(tier) do
+        local spells = type(affix.spell) == "table" and affix.spell or {affix.spell}
+        for _, id in ipairs(spells) do ALL_AFFIX_SPELL_IDS[id] = true end
+        AFFIX_COLOR_MAP[affix.name] = colorMap[affix.name:gsub(" ", "_")] or "|cffffffff"
     end
 end
-RollWeeklyAffixes()
+
+local WEEKLY_AFFIXES = {}
+math.randomseed(os.time())
+for i = 1, 3 do
+    local pool = WEEKLY_AFFIX_POOL[i]
+    if #pool > 0 then table.insert(WEEKLY_AFFIXES, pool[math.random(#pool)]) end
+end
 
 local KEY_IDS = { [1]=900100, [2]=900101, [3]=900102 }
 local ICONS = {
@@ -100,17 +104,11 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
     local map = player:GetMap(); if not map then return end
     local seen = {}
     for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
-        local guid, faction = creature:GetGUIDLow(), creature:GetFaction()
+        local guid, f = creature:GetGUIDLow(), creature:GetFaction()
         if not seen[guid] and creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer()
-        and (not FRIENDLY_FACTIONS[faction] or creature:GetEntry() == 26861 or creature:GetName() == "King Ymiron") then
+        and (not FRIENDLY_FACTIONS[f] or creature:GetEntry() == 26861 or creature:GetName() == "King Ymiron") then
             seen[guid] = true
-            for _, spellId in ipairs(affixes) do
-                if not creature:HasAura(spellId) then
-                    if not creature:CastSpell(creature, spellId, true) then
-                        creature:AddAura(spellId, creature)
-                    end
-                end
-            end
+            for _, spellId in ipairs(affixes) do creature:CastSpell(creature, spellId, true) end
         end
     end
 end
@@ -152,42 +150,74 @@ local function StartAuraLoop(player, instanceId, mapId, affixes, interval)
 end
 
 local function AwardMythicPoints(p, t, d)
-    local g,n=p:GetGUIDLow(),os.time()
-    local g1,g2=TIER_RATING_GAIN[t],(TIER_RATING_LOSS[t]or 0)*(d or 0)
-    local r=CharDBQuery("SELECT total_points,claimed_tier1,claimed_tier2,claimed_tier3 FROM character_mythic_rating WHERE guid="..g)
-    local pv=r and r:GetUInt32(0)or 0
-    local rw,pd=math.max(math.min(pv+g1-g2,2000),0),pv
-    local c1,c2,c3=r and r:GetUInt32(1)or 0,r and r:GetUInt32(2)or 0,r and r:GetUInt32(3)or 0
-    if t==1 then c1=c1+1 elseif t==2 then c2=c2+1 elseif t==3 then c3=c3+1 end
-    CharDBExecute(string.format("INSERT INTO character_mythic_rating (guid,total_runs,total_points,claimed_tier1,claimed_tier2,claimed_tier3,last_updated) VALUES(%d,1,%d,%d,%d,%d,FROM_UNIXTIME(%d)) ON DUPLICATE KEY UPDATE total_runs=total_runs+1,total_points=%d,claimed_tier1=%d,claimed_tier2=%d,claimed_tier3=%d,last_updated=FROM_UNIXTIME(%d);",g,rw,c1,c2,c3,n,rw,c1,c2,c3,n))
-    local rc="|cff1eff00";if rw>=1800 then rc="|cffff8000" elseif rw>=1000 then rc="|cffa335ee" elseif rw>=500 then rc="|cff0070dd" end
-    local msg=rw==pd and "|cffffcc00No rating added because you are rating capped!|r" or string.format("|cff00ff00+%d rating|r%s",rw-pd+g2,(d>0 and string.format(" |cffff0000(-%d from deaths)|r",g2)or""))
-    p:SendBroadcastMessage(string.format("|cffffff00Tier %d key completed.|r\n%s\nNew Rating: %s%d|r",t,msg,rc,rw))
-    local i,c=45624,1;if rw>1800 then i,c=49426,2 elseif rw>1000 then i=49426 elseif rw>500 then i=47241 end
-    p:AddItem(i,c)
-    p:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Reward: |cffaaff00%s x%d|r\nYour final rating: %s%d|r",GetItemLink(i),c,rc,rw))
-    if t==1 then p:AddItem(KEY_IDS[2],1)p:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 2 Keystone granted!") end
-    if t==2 then p:AddItem(KEY_IDS[3],1)p:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 3 Keystone granted!") end
+    if not p then
+        print("[Mythic] AwardMythicPoints called without valid player — aborting.")
+        return
+    end
+    local g, n = p:GetGUIDLow(), os.time()
+    local g1, g2 = TIER_RATING_GAIN[t], (TIER_RATING_LOSS[t] or 0) * (d or 0)
+    local r = CharDBQuery("SELECT total_points,claimed_tier1,claimed_tier2,claimed_tier3 FROM character_mythic_rating WHERE guid=" .. g)
+    local pv = r and r:GetUInt32(0) or 0
+    local rw, pd = math.max(math.min(pv + g1 - g2, 2000), 0), pv
+    local c1 = r and r:GetUInt32(1) or 0
+    local c2 = r and r:GetUInt32(2) or 0
+    local c3 = r and r:GetUInt32(3) or 0
+    if t == 1 then c1 = c1 + 1 elseif t == 2 then c2 = c2 + 1 elseif t == 3 then c3 = c3 + 1 end
+    CharDBExecute(string.format(
+        "INSERT INTO character_mythic_rating (guid,total_runs,total_points,claimed_tier1,claimed_tier2,claimed_tier3,last_updated) VALUES(%d,1,%d,%d,%d,%d,FROM_UNIXTIME(%d)) ON DUPLICATE KEY UPDATE total_runs=total_runs+1,total_points=%d,claimed_tier1=%d,claimed_tier2=%d,claimed_tier3=%d,last_updated=FROM_UNIXTIME(%d);",
+        g, rw, c1, c2, c3, n, rw, c1, c2, c3, n
+    ))
+    local rc = "|cff1eff00"
+    if rw >= 1800 then rc = "|cffff8000"
+    elseif rw >= 1000 then rc = "|cffa335ee"
+    elseif rw >= 500 then rc = "|cff0070dd" end
+    local msg = rw == pd and "|cffffcc00No rating added because you are rating capped!|r"
+        or string.format("|cff00ff00+%d rating|r%s", rw - pd + g2, (d > 0 and string.format(" |cffff0000(-%d from deaths)|r", g2) or ""))
+    p:SendBroadcastMessage(string.format("|cffffff00Tier %d key completed.|r\n%s\nNew Rating: %s%d|r", t, msg, rc, rw))
+    local i, c = 45624, 1
+    if rw > 1800 then i, c = 49426, 2
+    elseif rw > 1000 then i = 49426
+    elseif rw > 500 then i = 47241 end
+    p:AddItem(i, c)
+    p:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Reward: |cffaaff00%s x%d|r\nYour final rating: %s%d|r", GetItemLink(i), c, rc, rw))
+    if t == 1 then
+        p:AddItem(KEY_IDS[2], 1)
+        p:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 2 Keystone granted!")
+    end
+    if t == 2 then
+        p:AddItem(KEY_IDS[3], 1)
+        p:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 3 Keystone granted!")
+    end
 end
 
 local function PenalizeMythicPoints(player, tier)
+    if not player then
+        print("[Mythic] PenalizeMythicPoints called without valid player — aborting.")
+        return
+    end
     local guid = player:GetGUIDLow()
     local loss = TIER_RATING_LOSS[tier]
     local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
     local previous = result and result:GetUInt32(0) or 0
     local updated = math.max(previous - loss, 0)
-    CharDBExecute(string.format("INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;", guid, updated, updated))
+    CharDBExecute(string.format(
+        "INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;",
+        guid, updated, updated
+    ))
     player:SendBroadcastMessage(string.format("|cffffff00Tier %d death:|r |cffff0000-%d|r", tier, loss))
 end
+
 function Pedestal_OnGossipHello(_, player, creature)
     local map = player:GetMap(); if not map then return end
     local instanceId = map:GetInstanceId()
     player:GossipClearMenu()
+
     local header = "|cff000000This Week's Mythic Affixes:|r"
     for tier = 1, 3 do
         local line = "|cff000000T"..tier..":|r "
         for i = 1, tier do
-            local affix = WEEKLY_AFFIXES[i]; if affix then
+            local affix = WEEKLY_AFFIXES[i]
+            if affix then
                 local color = AFFIX_COLOR_MAP[affix.name] or "|cffffffff"
                 line = line..color..affix.name.."|r"..(i < tier and "|cff000000, |r" or "")
             end
@@ -195,17 +225,27 @@ function Pedestal_OnGossipHello(_, player, creature)
         header = header.."\n"..line
     end
     player:GossipMenuAddItem(0, header, 0, 0)
+
     if MYTHIC_FLAG_TABLE[instanceId] then
         player:GossipMenuAddItem(0, "|cffff0000You've already used a keystone.|r", 0, 999)
+    elseif MYTHIC_KILL_LOCK[instanceId] then
+        local lockMsg = "|cffff0000Mythic+ is locked. Reset the dungeon to enable keystone use.|r"
+        player:GossipMenuAddItem(0, lockMsg, 0, 999)
+        player:SendBroadcastMessage(lockMsg)
     else
         for tier = 1, 3 do
             player:GossipMenuAddItem(10, string.format("|cff000000Tier %d|r", tier), 0, 100 + tier, false, "", 0, ICONS[tier])
         end
     end
+
     player:GossipSendMenu(1, creature)
 end
 
 function ScheduleMythicTimeout(player, instanceId, tier)
+    if not player then
+        print("[Mythic] ScheduleMythicTimeout called without valid player — aborting.")
+        return
+    end
     local duration = (tier == 1 and 15 or 30) * 60000
     local auraId = (tier == 1) and 26013 or 71041
     local guid = player:GetGUIDLow()
@@ -234,6 +274,23 @@ function ScheduleMythicTimeout(player, instanceId, tier)
         end
     end, 5000, 0)
 
+    local function DeductMythicRatingOnFailure(player, tier)
+    if not player then
+        print("[Mythic] DeductMythicRatingOnFailure called without valid player — aborting.")
+        return
+    end
+    local guid = player:GetGUIDLow()
+    local loss = TIER_RATING_LOSS[tier] or 0
+    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
+    local previous = result and result:GetUInt32(0) or 0
+    local updated = math.max(previous - loss, 0)
+    CharDBExecute(string.format(
+        "INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;",
+        guid, updated, updated
+    ))
+    player:SendBroadcastMessage(string.format("|cffffff00Mythic timeout:|r |cffff0000-%d rating|r", loss))
+end
+
     CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
         if p and p:IsInWorld() and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
@@ -258,7 +315,7 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
     if intid >= 100 and intid <= 103 then
         local map = player:GetMap(); if not map then player:SendBroadcastMessage("Error: No map context.") player:GossipComplete() return end
         local instanceId = map:GetInstanceId()
-        if MYTHIC_KILL_LOCK[instanceId] then player:SendBroadcastMessage("|cffff0000[Mythic]|r A creature has already been killed. Reset the dungeon to activate Mythic mode.") player:GossipComplete() return end
+        if MYTHIC_KILL_LOCK[instanceId] then return player:SendBroadcastMessage("|cffff0000[Mythic]|r A creature was already killed. Reset the dungeon to use a keystone."), player:GossipComplete() end
         if MYTHIC_FLAG_TABLE[instanceId] then player:SendBroadcastMessage("|cffff0000Mythic mode has already been activated in this instance.|r") player:GossipComplete() return end
         local tier, keyId = intid - 100, KEY_IDS[intid - 100]
         if not player:HasItem(keyId) then player:SendBroadcastMessage("You do not have the required Tier "..tier.." Keystone.") player:GossipComplete() return end
@@ -349,21 +406,16 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
 end)
 
-RegisterPlayerEvent(7, function(_, killer, victim)
-    if not killer or not killer:IsPlayer() or not victim or victim:GetObjectType() ~= "Creature" then return end
-    local map = killer:GetMap(); if not map then return end
-    local mapId, instanceId = map:GetMapId(), map:GetInstanceId()
-
-    if MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_MODE_ENDED[instanceId] then return end
-
-    local finalData = MYTHIC_FINAL_BOSSES[mapId]
-    if finalData and victim:GetEntry() == finalData.final then return end
-
-    local faction = victim:GetFaction()
-    if not MYTHIC_HOSTILE_FACTIONS[faction] then return end
-
-    MYTHIC_KILL_LOCK[instanceId] = true
-    killer:SendBroadcastMessage("|cffff0000[Mythic]|r You have slain a hostile enemy. Mythic mode is now locked for this dungeon run.")
+RegisterPlayerEvent(7, function(_, k, v)
+    if not k or not k:IsPlayer() or not v or v:GetObjectType() ~= "Creature" then return end
+    local m = k:GetMap(); if not m or not m:IsDungeon() then return end
+    local mid, iid = m:GetMapId(), m:GetInstanceId()
+    if MYTHIC_FLAG_TABLE[iid] or MYTHIC_MODE_ENDED[iid] or MYTHIC_KILL_LOCK[iid] then return end
+    local d = MYTHIC_FINAL_BOSSES[mid]; if d and v:GetEntry() == d.final then return end
+    if not MYTHIC_HOSTILE_FACTIONS[v:GetFaction()] then return end
+    MYTHIC_KILL_LOCK[iid] = true
+    local msg = "|cffff0000[Mythic]|r Mythic+ is now locked because a hostile enemy was slain. Reset the dungeon to enable keystone use."
+    for _, p in pairs(m:GetPlayers() or {}) do p:SendBroadcastMessage(msg) end
 end)
 
 if not MYTHIC_CHEST_SPAWNED then MYTHIC_CHEST_SPAWNED = {} end
@@ -454,6 +506,10 @@ __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
 __MYTHIC_RESET_PENDING__ = __MYTHIC_RESET_PENDING__ or {}
 
 RegisterPlayerEvent(42, function(_, player, command)
+    if not player then
+        return false
+    end
+
     local cmd = command:lower():gsub("[#./]", "")
     local guid, now = player:GetGUIDLow(), os.time()
 
