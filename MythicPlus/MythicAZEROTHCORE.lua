@@ -16,7 +16,7 @@ MYTHIC_MODE_ENDED = MYTHIC_MODE_ENDED or {}
 local MYTHIC_ENTRY_RANGE = { start = 1, stop = 60000 }
 local MYTHIC_HOSTILE_FACTIONS = { [16] = true, [21] = true, [1885] = true }
 local FRIENDLY_FACTIONS = {
-  [1]=true, [2]=true, [3]=true, [4]=true, [6]=true, [14]=true, [31]=true, [35]=true,
+  [1]=true, [2]=true, [3]=true, [4]=true, [5]=true, [6]=true, [14]=true, [31]=true, [35]=true,
   [114]=true, [115]=true, [116]=true, [188]=true, [190]=true, [1610]=true, [1629]=true,
   [1683]=true, [1718]=true, [1770]=true
 }
@@ -328,12 +328,16 @@ end)
 
 RegisterPlayerEvent(42, function(_, player, command)
     if command:lower():gsub("[#./]", "") ~= "mythicrating" then return end
+
     local guid, now = player:GetGUIDLow(), os.time()
+
+    __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
     if now - (__MYTHIC_RATING_COOLDOWN__[guid] or 0) < 300 then
         player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes.")
         return false
     end
     __MYTHIC_RATING_COOLDOWN__[guid] = now
+
     local result = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = "..guid)
     if result then
         local rating, runs = result:GetUInt32(0), result:GetUInt32(1)
@@ -430,4 +434,84 @@ RegisterPlayerEvent(3, function(_, player)
     end
     local msg = "|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(affixNames, ", ")
     player:SendBroadcastMessage(msg)
+end)
+
+RegisterPlayerEvent(18, function(_, player, msg, _, _)
+    local guid = player:GetGUIDLow()
+    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
+    if result then
+        local rating = result:GetUInt32(0)
+        if rating >= 1801 then
+            local name = player:GetName()
+            local customName = "{star}" .. name
+            SendWorldMessage(string.format("[%s] %s", customName, msg))
+            return false
+        end
+    end
+end)
+
+__MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
+__MYTHIC_RESET_PENDING__ = __MYTHIC_RESET_PENDING__ or {}
+
+RegisterPlayerEvent(42, function(_, player, command)
+    local cmd = command:lower():gsub("[#./]", "")
+    local guid, now = player:GetGUIDLow(), os.time()
+
+    if cmd == "mythicrating" then
+        local last = __MYTHIC_RATING_COOLDOWN__[guid] or 0
+        if now - last < 300 then
+            player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes.")
+            return false
+        end
+        __MYTHIC_RATING_COOLDOWN__[guid] = now
+
+        local q = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = "..guid)
+        if q then
+            local rating, runs = q:GetUInt32(0), q:GetUInt32(1)
+            local c = rating >= 1801 and "|cffff8000" or rating >= 1001 and "|cffa335ee" or rating >= 501 and "|cff0070dd" or "|cff1eff00"
+            player:SendBroadcastMessage(string.format("|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", c, rating, runs))
+        else
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
+        end
+        return false
+    end
+
+    if cmd == "mythichelp" then
+        player:SendBroadcastMessage("|cff66ccff[Mythic]|r Available commands:")
+        player:SendBroadcastMessage("|cffffff00.mythicrating|r - View your Mythic+ rating and runs.")
+        player:SendBroadcastMessage("|cffffff00.mythichelp|r - Show this help menu.")
+        if player:IsGM() then
+            player:SendBroadcastMessage("|cffff6600.mythicreset|r - GM ONLY: Start full server rating reset.")
+            player:SendBroadcastMessage("|cffff6600.mythicreset confirm|r - GM ONLY: Confirm the reset within 30 seconds.")
+        end
+        return false
+    end
+
+    if cmd == "mythicreset" then
+        if not player:IsGM() then
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
+        else
+            __MYTHIC_RESET_PENDING__[guid] = now
+            player:SendBroadcastMessage("|cffffff00[Mythic]|r Type |cff00ff00.mythicreset confirm|r within 30 seconds to confirm full reset.")
+        end
+        return false
+    end
+
+    if cmd == "mythicresetconfirm" then
+        local t = __MYTHIC_RESET_PENDING__[guid]
+        if not t or now - t > 30 then
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r No reset pending or confirmation expired. Use |cff00ff00.mythicreset|r first.")
+        else
+            __MYTHIC_RESET_PENDING__[guid] = nil
+            CharDBExecute([[
+                UPDATE character_mythic_rating
+                SET total_points = 0, total_runs = 0,
+                    claimed_tier1 = 0, claimed_tier2 = 0, claimed_tier3 = 0,
+                    last_updated = NOW();
+            ]])
+            player:SendBroadcastMessage("|cff00ff00[Mythic]|r All player ratings and run counts have been reset.")
+            SendWorldMessage("|cffffcc00[Mythic]|r A Game Master has reset all Mythic+ player ratings.")
+        end
+        return false
+    end
 end)
