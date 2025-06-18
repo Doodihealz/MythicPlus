@@ -383,29 +383,6 @@ RegisterPlayerEvent(28, function(_, p)
     end
 end)
 
-RegisterPlayerEvent(42, function(_, player, command)
-    if command:lower():gsub("[#./]", "") ~= "mythicrating" then return end
-
-    local guid, now = player:GetGUIDLow(), os.time()
-
-    __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
-    if now - (__MYTHIC_RATING_COOLDOWN__[guid] or 0) < 300 then
-        player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes.")
-        return false
-    end
-    __MYTHIC_RATING_COOLDOWN__[guid] = now
-
-    local result = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = "..guid)
-    if result then
-        local rating, runs = result:GetUInt32(0), result:GetUInt32(1)
-        local color = rating <= 500 and "|cff1eff00" or rating <= 1000 and "|cff0070dd" or rating <= 1800 and "|cffa335ee" or "|cffff8000"
-        player:SendBroadcastMessage(string.format("|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", color, rating, runs))
-    else
-        player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
-    end
-    return false
-end)
-
 RegisterPlayerEvent(7, function(_, k, v)
     if not k or not k:IsPlayer() or not v or v:GetObjectType() ~= "Creature" then return end
     local m = k:GetMap(); if not m or not m:IsDungeon() then return end
@@ -492,12 +469,14 @@ __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
 __MYTHIC_RESET_PENDING__ = __MYTHIC_RESET_PENDING__ or {}
 
 RegisterPlayerEvent(42, function(_, player, command)
-    if not player then
-        return false
-    end
+    if not player then return false end
 
     local cmd = command:lower():gsub("[#./]", "")
-    local guid, now = player:GetGUIDLow(), os.time()
+    local guid = player:GetGUIDLow()
+    local now = os.time()
+
+    __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
+    __MYTHIC_RESET_PENDING__ = __MYTHIC_RESET_PENDING__ or {}
 
     if cmd == "mythicrating" then
         local last = __MYTHIC_RATING_COOLDOWN__[guid] or 0
@@ -510,7 +489,10 @@ RegisterPlayerEvent(42, function(_, player, command)
         local q = CharDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = "..guid)
         if q then
             local rating, runs = q:GetUInt32(0), q:GetUInt32(1)
-            local c = rating >= 1801 and "|cffff8000" or rating >= 1001 and "|cffa335ee" or rating >= 501 and "|cff0070dd" or "|cff1eff00"
+            local c = rating >= 1801 and "|cffff8000"
+                or rating >= 1001 and "|cffa335ee"
+                or rating >= 501 and "|cff0070dd"
+                or "|cff1eff00"
             player:SendBroadcastMessage(string.format("|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", c, rating, runs))
         else
             player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
