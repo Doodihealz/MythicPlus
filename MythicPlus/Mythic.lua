@@ -91,15 +91,6 @@ local function GetAffixSet(tier)
     return list
 end
 
-local function GetAffixNameSet(tier)
-    local names = {}
-    for i = 1, tier do
-        local affix = WEEKLY_AFFIXES[i]
-        if affix then table.insert(names, affix.name) end
-    end
-    return table.concat(names, ", ")
-end
-
 local function ApplyAuraToNearbyCreatures(player, affixes)
     local map = player:GetMap(); if not map then return end
     local seen = {}
@@ -241,6 +232,39 @@ function Pedestal_OnGossipHello(_, player, creature)
     player:GossipSendMenu(1, creature)
 end
 
+local function DeductMythicRatingOnFailure(player, tier)
+    if not player then
+        print("[Mythic] DeductMythicRatingOnFailure called without valid player — aborting.")
+        return
+    end
+
+    local guid = player:GetGUIDLow()
+    local TIMEOUT_PENALTY = { [1]=10, [2]=20, [3]=30 }
+    local loss = TIMEOUT_PENALTY[tier] or 0
+
+    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
+    local previous = result and result:GetUInt32(0) or 0
+
+    local updated = math.max(previous - loss, 0)
+
+    CharDBExecute(string.format(
+        "INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;",
+        guid, updated, updated
+    ))
+
+    local rc = "|cff1eff00"
+    if updated >= 1800 then rc = "|cffff8000"
+    elseif updated >= 1000 then rc = "|cffa335ee"
+    elseif updated >= 500 then rc = "|cff0070dd" end
+
+    player:SendBroadcastMessage(string.format(
+        "|cffffff00Mythic failed:|r |cffff0000-%d rating|r\nNew Rating: %s%d|r",
+        previous - updated,
+        rc,
+        updated
+    ))
+end
+
 function ScheduleMythicTimeout(player, instanceId, tier)
     if not player then
         print("[Mythic] ScheduleMythicTimeout called without valid player — aborting.")
@@ -258,6 +282,7 @@ function ScheduleMythicTimeout(player, instanceId, tier)
             local map = p:GetMap()
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
+            DeductMythicRatingOnFailure(p, tier)
 
             if MYTHIC_LOOP_HANDLERS[instanceId] then
                 RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
@@ -270,26 +295,8 @@ function ScheduleMythicTimeout(player, instanceId, tier)
                 "DELETE FROM character_mythic_instance_state WHERE guid = %d AND instance_id = %d;",
                 guid, instanceId
             ))
-            DeductMythicRatingOnFailure(p, tier)
         end
     end, 5000, 0)
-
-    local function DeductMythicRatingOnFailure(player, tier)
-    if not player then
-        print("[Mythic] DeductMythicRatingOnFailure called without valid player — aborting.")
-        return
-    end
-    local guid = player:GetGUIDLow()
-    local loss = TIER_RATING_LOSS[tier] or 0
-    local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
-    local previous = result and result:GetUInt32(0) or 0
-    local updated = math.max(previous - loss, 0)
-    CharDBExecute(string.format(
-        "INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;",
-        guid, updated, updated
-    ))
-    player:SendBroadcastMessage(string.format("|cffffff00Mythic timeout:|r |cffff0000-%d rating|r", loss))
-end
 
     CreateLuaEvent(function()
         local p = GetPlayerByGUID(guid)
@@ -324,14 +331,24 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         CharDBExecute(string.format([[INSERT INTO character_mythic_rating (guid, total_runs, total_points, claimed_tier1, claimed_tier2, claimed_tier3, last_updated)
             VALUES (%d, 0, 0, %d, %d, %d, FROM_UNIXTIME(%d))
             ON DUPLICATE KEY UPDATE last_updated = FROM_UNIXTIME(%d);]], guid, tier==1 and 1 or 0, tier==2 and 1 or 0, tier==3 and 1 or 0, now, now))
-        local affixes, affixNames = GetAffixSet(tier), GetAffixNameSet(tier)
+        local affixes = GetAffixSet(tier)
+        local affixNames = {}
+        for i = 1, tier do
+            local affix = WEEKLY_AFFIXES[i]
+            if affix then
+                local color = AFFIX_COLOR_MAP[affix.name] or "|cffffffff"
+                table.insert(affixNames, color .. affix.name .. "|r")
+            end
+        end
+        affixNames = table.concat(affixNames, ", ")
         MYTHIC_FLAG_TABLE[instanceId], MYTHIC_AFFIXES_TABLE[instanceId], MYTHIC_REWARD_CHANCE_TABLE[instanceId] = true, affixes, tier==1 and 1.5 or tier==2 and 2.0 or 5.0
         ScheduleMythicTimeout(player, instanceId, tier)
         local ratingQuery = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
         local currentRating = ratingQuery and ratingQuery:GetUInt32(0) or 0
         local c = "|cff1eff00"
         if currentRating >= 1800 then c = "|cffff8000" elseif currentRating >= 1000 then c = "|cffa335ee" elseif currentRating >= 500 then c = "|cff0070dd" end
-        player:SendBroadcastMessage(string.format("Tier %d Keystone inserted.\nAffixes: %s\nCurrent Rating: %s%d|r", tier, affixNames, c, currentRating))
+        local tierColor = (tier == 3 and "|cffff8000") or (tier == 2 and "|cffa335ee") or "|cff0070dd"
+        player:SendBroadcastMessage(string.format("%sTier %d Keystone|r inserted.\nAffixes: %s\nCurrent Rating: %s%d|r", tierColor, tier, affixNames, c, currentRating))
         player:RemoveItem(keyId, 1)
         ApplyAuraToNearbyCreatures(player, affixes)
         StartAuraLoop(player, instanceId, map:GetMapId(), affixes, 6000)
