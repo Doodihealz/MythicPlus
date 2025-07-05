@@ -172,14 +172,14 @@ local function AwardMythicPoints(p, t, d)
     elseif rw >= 1000 then rc = "|cffa335ee"
     elseif rw >= 500 then rc = "|cff0070dd" end
     local msg = rw == pd and "|cffffcc00No rating added because you are rating capped!|r"
-        or string.format("|cff00ff00+%d rating|r%s", rw - pd + g2, (d > 0 and string.format(" |cffff0000(-%d from deaths)|r", g2) or ""))
-    p:SendBroadcastMessage(string.format("|cffffff00Tier %d key completed.|r\n%s\nNew Rating: %s%d|r", t, msg, rc, rw))
+    or string.format("|cff00ff00Gained +%d rating|r%s", rw - pd + g2, (d > 0 and string.format(" |cffff0000(-%d from deaths)|r", g2) or ""))
+    p:SendBroadcastMessage(string.format("|cffffff00Tier %d completed! Mythic+ mode has been ended for this dungeon run.|r\n%s\nNew Rating: %s%d|r", t, msg, rc, rw))
     local i, c = 45624, 1
     if rw > 1800 then i, c = 49426, 2
     elseif rw > 1000 then i = 49426
     elseif rw > 500 then i = 47241 end
     p:AddItem(i, c)
-    p:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Reward: |cffaaff00%s x%d|r\nYour final rating: %s%d|r", GetItemLink(i), c, rc, rw))
+    p:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Reward: |cffaaff00%s x%d|r", GetItemLink(i), c))
     if t == 1 then
         p:AddItem(KEY_IDS[2], 1)
         p:SendBroadcastMessage("|cffffff00[Mythic]|r Tier 2 Keystone granted!")
@@ -435,7 +435,6 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
                         AwardMythicPoints(player, tier, deaths)
                         local aura = tier == 1 and 26013 or 71041
                         if player:HasAura(aura) then player:RemoveAura(aura) end
-                        player:SendBroadcastMessage("|cff00ff00Mythic+ dungeon complete! Rewards granted.")
                     end
                 end
             end
