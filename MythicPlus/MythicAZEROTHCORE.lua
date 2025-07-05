@@ -383,16 +383,32 @@ RegisterPlayerEvent(28, function(_, p)
     end
 end)
 
-RegisterPlayerEvent(7, function(_, k, v)
-    if not k or not k:IsPlayer() or not v or v:GetObjectType() ~= "Creature" then return end
-    local m = k:GetMap(); if not m or not m:IsDungeon() then return end
-    local mid, iid = m:GetMapId(), m:GetInstanceId()
+RegisterPlayerEvent(7, function(_, killer, victim)
+    if not killer or not killer:IsPlayer() or not victim or victim:GetObjectType() ~= "Creature" then return end
+
+    local map = killer:GetMap()
+    if not map or not map:IsDungeon() then return end
+
+    local iid = map:GetInstanceId()
+    local mid = map:GetMapId()
+
+    if map:GetDifficulty() < 1 then return end
+
+    if killer:GetLevel() < 80 then return end
+
     if MYTHIC_FLAG_TABLE[iid] or MYTHIC_MODE_ENDED[iid] or MYTHIC_KILL_LOCK[iid] then return end
-    local d = MYTHIC_FINAL_BOSSES[mid]; if d and v:GetEntry() == d.final then return end
-    if not MYTHIC_HOSTILE_FACTIONS[v:GetFaction()] then return end
+
+    local finalBoss = MYTHIC_FINAL_BOSSES[mid] and MYTHIC_FINAL_BOSSES[mid].final
+    if finalBoss and victim:GetEntry() == finalBoss then return end
+
+    if not MYTHIC_HOSTILE_FACTIONS[victim:GetFaction()] then return end
+
     MYTHIC_KILL_LOCK[iid] = true
+
     local msg = "|cffff0000[Mythic]|r Mythic+ is now locked because a hostile enemy was slain. Reset the dungeon to enable keystone use."
-    for _, p in pairs(m:GetPlayers() or {}) do p:SendBroadcastMessage(msg) end
+    for _, player in pairs(map:GetPlayers() or {}) do
+        player:SendBroadcastMessage(msg)
+    end
 end)
 
 if not MYTHIC_CHEST_SPAWNED then MYTHIC_CHEST_SPAWNED = {} end
