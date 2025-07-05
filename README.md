@@ -1,4 +1,4 @@
-# Mythic+ Eluna Script for WotLK
+# Mythic+ Eluna Script for WotLK Azerothcore
 
 A full-featured, Mythic+ style challenge system for Eluna-based Wrath of the Lich King private servers.  
 Supports timed runs, weekly affixes, rating progression, loot chests, rating penalties, and a custom keystone exchange NPC.
