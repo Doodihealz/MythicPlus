@@ -232,20 +232,20 @@ function Pedestal_OnGossipHello(_, player, creature)
     player:GossipSendMenu(1, creature)
 end
 
-local function DeductMythicRatingOnFailure(player, tier)
-    if not player then
-        print("[Mythic] DeductMythicRatingOnFailure called without valid player — aborting.")
-        return
-    end
+local function DeductMythicRatingOnFailure(player, tier, deathCount)
+    if not player then return end
+
+    local TIMEOUT_PENALTY = { [1]=10, [2]=20, [3]=30 }
+    local DEATH_PENALTY = { [1]=3, [2]=6, [3]=9 }
 
     local guid = player:GetGUIDLow()
-    local TIMEOUT_PENALTY = { [1]=10, [2]=20, [3]=30 }
-    local loss = TIMEOUT_PENALTY[tier] or 0
+    local timeoutLoss = TIMEOUT_PENALTY[tier] or 0
+    local deathLoss = (DEATH_PENALTY[tier] or 0) * (deathCount or 0)
+    local totalLoss = timeoutLoss + deathLoss
 
     local result = CharDBQuery("SELECT total_points FROM character_mythic_rating WHERE guid = " .. guid)
     local previous = result and result:GetUInt32(0) or 0
-
-    local updated = math.max(previous - loss, 0)
+    local updated = math.max(previous - totalLoss, 0)
 
     CharDBExecute(string.format(
         "INSERT INTO character_mythic_rating (guid, total_runs, total_points) VALUES (%d, 0, %d) ON DUPLICATE KEY UPDATE total_points = %d;",
@@ -258,18 +258,17 @@ local function DeductMythicRatingOnFailure(player, tier)
     elseif updated >= 500 then rc = "|cff0070dd" end
 
     player:SendBroadcastMessage(string.format(
-        "|cffffff00Mythic failed:|r |cffff0000-%d rating|r\nNew Rating: %s%d|r",
+        "|cffffff00Mythic failed:|r |cffff0000-%d rating|r (|cffff5555%d deaths|r)\nNew Rating: %s%d|r",
         previous - updated,
+        deathCount or 0,
         rc,
         updated
     ))
 end
 
 function ScheduleMythicTimeout(player, instanceId, tier)
-    if not player then
-        print("[Mythic] ScheduleMythicTimeout called without valid player — aborting.")
-        return
-    end
+    if not player then return end
+
     local duration = (tier == 1 and 15 or 30) * 60000
     local auraId = (tier == 1) and 26013 or 71041
     local guid = player:GetGUIDLow()
@@ -282,7 +281,9 @@ function ScheduleMythicTimeout(player, instanceId, tier)
             local map = p:GetMap()
             MYTHIC_TIMER_EXPIRED[instanceId] = true
             p:SendBroadcastMessage("|cffff0000[Mythic]|r Time ran out. Mythic mode failed.")
-            DeductMythicRatingOnFailure(p, tier)
+
+            local deathCount = MYTHIC_DEATHS[instanceId] and MYTHIC_DEATHS[instanceId][guid] or 0
+            DeductMythicRatingOnFailure(p, tier, deathCount)
 
             if MYTHIC_LOOP_HANDLERS[instanceId] then
                 RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
@@ -361,14 +362,74 @@ end
 RegisterCreatureGossipEvent(PEDESTAL_NPC_ENTRY, 1, Pedestal_OnGossipHello)
 RegisterCreatureGossipEvent(PEDESTAL_NPC_ENTRY, 2, Pedestal_OnGossipSelect)
 
-RegisterPlayerEvent(6, function(_, player)
-    local map = player:GetMap(); if not map or map:GetDifficulty() == 0 then return end
+RegisterPlayerEvent(8, function(event, killer, victim)
+    if not victim or not victim:IsPlayer() then return end
+
+    local map = victim:GetMap()
+    if not map or map:GetDifficulty() == 0 then return end
+
     local instanceId = map:GetInstanceId()
     if not MYTHIC_FLAG_TABLE[instanceId] then return end
-    local guid = player:GetGUIDLow()
+
+    local guid = victim:GetGUIDLow()
     MYTHIC_DEATHS[instanceId] = MYTHIC_DEATHS[instanceId] or {}
     MYTHIC_DEATHS[instanceId][guid] = (MYTHIC_DEATHS[instanceId][guid] or 0) + 1
 end)
+
+for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
+    local bossId = data.final
+    if bossId then
+        RegisterCreatureEvent(bossId, 4, function(_, creature)
+            local map = creature:GetMap()
+            if not map then return end
+
+            local instanceId = map:GetInstanceId()
+            MYTHIC_MODE_ENDED[instanceId] = true
+            if not MYTHIC_FLAG_TABLE[instanceId] then return end
+
+            local expired = MYTHIC_TIMER_EXPIRED[instanceId]
+            local affixes = MYTHIC_AFFIXES_TABLE[instanceId] or {}
+            local tier = (#affixes >= 4) and 3 or (#affixes == 3 and 2 or 1)
+
+            local playerDeaths = {}
+            for _, player in pairs(map:GetPlayers() or {}) do
+                local guid = player:GetGUIDLow()
+                playerDeaths[guid] = MYTHIC_DEATHS[instanceId] and MYTHIC_DEATHS[instanceId][guid] or 0
+            end
+
+            for _, player in pairs(map:GetPlayers() or {}) do
+                if player:IsAlive() and player:IsInWorld() then
+                    if expired then
+                        player:SendBroadcastMessage("|cffff0000[Mythic]|r Time expired. No rewards granted.")
+                    else
+                        local deaths = playerDeaths[player:GetGUIDLow()] or 0
+                        AwardMythicPoints(player, tier, deaths)
+                        local aura = tier == 1 and 26013 or 71041
+                        if player:HasAura(aura) then
+                            player:RemoveAura(aura)
+                        end
+                    end
+                end
+            end
+
+            if not expired then
+                local x, y, z, o = creature:GetX(), creature:GetY(), creature:GetZ(), creature:GetO()
+                x, y = x - math.cos(o) * 2, y - math.sin(o) * 2
+                SpawnMythicRewardChest(x, y, z, o, creature:GetMapId(), instanceId, tier)
+            end
+
+            RemoveAffixAurasFromAllCreatures(instanceId, map)
+
+            if MYTHIC_LOOP_HANDLERS[instanceId] then
+                RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId])
+            end
+            MYTHIC_FLAG_TABLE[instanceId] = nil
+            MYTHIC_AFFIXES_TABLE[instanceId] = nil
+            MYTHIC_REWARD_CHANCE_TABLE[instanceId] = nil
+            MYTHIC_DEATHS[instanceId] = nil
+        end)
+    end
+end
 
 RegisterPlayerEvent(3, function(_, player)
     if not ANNOUNCE_AFFIXES_ON_LOGIN then return end
