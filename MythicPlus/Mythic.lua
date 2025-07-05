@@ -317,7 +317,7 @@ function ScheduleMythicTimeout(player, instanceId, tier)
     end, duration, 1)
 end
 
-function Pedestal_OnGossipSelect(_, player, _, _, intid)
+function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     if intid == 999 then player:GossipComplete() return end
     if intid >= 100 and intid <= 103 then
         local map = player:GetMap(); if not map then player:SendBroadcastMessage("Error: No map context.") player:GossipComplete() return end
@@ -349,6 +349,7 @@ function Pedestal_OnGossipSelect(_, player, _, _, intid)
         if currentRating >= 1800 then c = "|cffff8000" elseif currentRating >= 1000 then c = "|cffa335ee" elseif currentRating >= 500 then c = "|cff0070dd" end
         local tierColor = (tier == 3 and "|cffff8000") or (tier == 2 and "|cffa335ee") or "|cff0070dd"
         player:SendBroadcastMessage(string.format("%sTier %d Keystone|r inserted.\nAffixes: %s\nCurrent Rating: %s%d|r", tierColor, tier, affixNames, c, currentRating))
+        creature:SendUnitSay("Good luck... You'll need it.", 0)
         player:RemoveItem(keyId, 1)
         ApplyAuraToNearbyCreatures(player, affixes)
         StartAuraLoop(player, instanceId, map:GetMapId(), affixes, 6000)
