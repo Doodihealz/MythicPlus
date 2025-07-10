@@ -1,3 +1,5 @@
+DEVELOPMENT ON HOLD FOR NOW. GO CHECK OUT Huptiq's version of this mod instead! https://github.com/huptiq/MythicPlus
+
 # Mythic+ Eluna Script for WotLK Azerothcore
 
 A full-featured, Mythic+ style challenge system for Eluna-based Wrath of the Lich King private servers.  
