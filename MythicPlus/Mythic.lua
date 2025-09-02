@@ -1,38 +1,86 @@
+--[[
+===========================================================
+ Mythic+ System for WotLK
+ Author: Doodihealz
+===========================================================
+]]
+
 print("[Mythic] Mythic script loaded successfully! Enjoy!")
 dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
 
+--==========================================================
+-- Config & Constants
+--==========================================================
 local PEDESTAL_NPC_ENTRY        = 900001
 local MYTHIC_SCAN_RADIUS        = 500
 local SLOTS                     = 6
 local RATING_CAP                = 2000
-local AURA_LOOP_INTERVAL        = 6000
-local COMMAND_COOLDOWN          = 300
-local RESET_CONFIRM_TIMEOUT     = 30
-local INSTANCE_STATE_TIMEOUT    = 7200
+local AURA_LOOP_INTERVAL        = 6000           -- ms; affix aura re-apply cadence
+local COMMAND_COOLDOWN          = 300            -- seconds; .mythicrating cooldown
+local RESET_CONFIRM_TIMEOUT     = 30             -- seconds; GM reset confirm window
+local INSTANCE_STATE_TIMEOUT    = 7200           -- seconds; resume window after DC/relog
 local FORGE_OF_SOULS_MAP_ID     = 632
 local CULLING_OF_STRATHOLME_MAP_ID = 595
+local AHN_KAHET_MAP_ID           = 619   -- Ahn'kahet: The Old Kingdom
+local VIOLET_HOLD_MAP_ID         = 608   -- The Violet Hold
 
+--=======================================================================================
+-- Overrides the timer and applies specific times to specific dungeons based on key used.
+--=======================================================================================
+local TIMER_OVERRIDES = {
+  -- Always-30 min regardless of tier
+  [AHN_KAHET_MAP_ID] = { fixed = 30 },
+
+  -- Always-15 min regardless of tier
+  [FORGE_OF_SOULS_MAP_ID] = { fixed = 15 },
+
+  -- Always-30 min regardless of tier
+  [CULLING_OF_STRATHOLME_MAP_ID] = { fixed = 30 },
+
+  -- Per-tier: VH T1=15, T2/T3=30
+  [VIOLET_HOLD_MAP_ID] = { per_tier = { [1]=15, [2]=30, [3]=30 } },
+}
+
+--==========================================================
+-- Runtime State (per-instance / persistent helpers)
+--==========================================================
 local MYTHIC_TIMER_EXPIRED      = MYTHIC_TIMER_EXPIRED or {}
-local MYTHIC_KILL_LOCK          = MYTHIC_KILL_LOCK or {}
-local MYTHIC_DEATHS             = MYTHIC_DEATHS or {}
-local MYTHIC_FLAG_TABLE         = MYTHIC_FLAG_TABLE or {}
-local MYTHIC_AFFIXES_TABLE      = MYTHIC_AFFIXES_TABLE or {}
+local MYTHIC_KILL_LOCK          = MYTHIC_KILL_LOCK or {}     -- prevents key after any mob kill
+local MYTHIC_DEATHS             = MYTHIC_DEATHS or {}        -- per-instance per-player deaths
+local MYTHIC_FLAG_TABLE         = MYTHIC_FLAG_TABLE or {}    -- run active flag
+local MYTHIC_AFFIXES_TABLE      = MYTHIC_AFFIXES_TABLE or {} -- run affix spell list
 local MYTHIC_REWARD_CHANCE_TABLE= MYTHIC_REWARD_CHANCE_TABLE or {}
-local MYTHIC_CHEST_SPAWNED      = MYTHIC_CHEST_SPAWNED or {}
-local MYTHIC_FINAL_BOSSES       = MYTHIC_FINAL_BOSSES or {}
+local MYTHIC_CHEST_SPAWNED      = MYTHIC_CHEST_SPAWNED or {} -- prevent duplicate chest
+local MYTHIC_FINAL_BOSSES       = MYTHIC_FINAL_BOSSES or {}  -- set in MythicBosses.lua
 local MYTHIC_MODE_ENDED         = MYTHIC_MODE_ENDED or {}
-local MYTHIC_LOOP_HANDLERS      = MYTHIC_LOOP_HANDLERS or {}
+local MYTHIC_LOOP_HANDLERS      = MYTHIC_LOOP_HANDLERS or {} -- aura loop event ids
 local MYTHIC_TIER_TABLE         = MYTHIC_TIER_TABLE or {}
-local MYTHIC_COMPLETION_STATE   = MYTHIC_COMPLETION_STATE or {}
+local MYTHIC_COMPLETION_STATE   = MYTHIC_COMPLETION_STATE or {} -- "active"/"completed"/"failed"
 local __MYTHIC_RATING_COOLDOWN__= __MYTHIC_RATING_COOLDOWN__ or {}
 local __MYTHIC_RESET_PENDING__  = __MYTHIC_RESET_PENDING__ or {}
+local CleanupMythicInstance
+local SpawnMythicRewardChest
 
+local function GetPedestalGreetingByRating(r)
+  if r >= 1800 then
+    return "I can think of none better for this trial. Show them no mercy, Mythic Champion!"
+  elseif r >= 1000 then
+    return "You will surely triumph in this challenge!"
+  elseif r >= 500 then
+    return "You may yet prevail in the trials ahead."
+  else
+    return "Good luck... you'll need it."
+  end
+end
+
+-- Tier properties: gains/losses, timer, aura indicator, color tag
 local TIER_CONFIG = {
   [1] = { rating_gain = 20, rating_loss = 3, timeout_penalty = 10, duration = 15, aura = 26013, color = "|cff0070dd" },
   [2] = { rating_gain = 40, rating_loss = 6, timeout_penalty = 20, duration = 30, aura = 71041, color = "|cffa335ee" },
   [3] = { rating_gain = 60, rating_loss = 9, timeout_penalty = 30, duration = 30, aura = 71041, color = "|cffff8000" }
 }
 
+-- Keys/Chests/Icons
 local KEY_IDS        = { [1] = 900100, [2] = 900101, [3] = 900102 }
 local CHEST_ENTRIES  = { [1] = 900010, [2] = 900011, [3] = 900012 }
 local ICONS = {
@@ -41,16 +89,22 @@ local ICONS = {
   [3] = "Interface\\Icons\\INV_Enchant_NexusCrystal"
 }
 
+-- Faction/entry filters for buffing and kill-lock logic
 local MYTHIC_HOSTILE_FACTIONS = { [16] = true, [21] = true, [1885] = true }
 local FRIENDLY_FACTIONS = {
   [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[14]=true,[31]=true,[35]=true,
   [114]=true,[115]=true,[116]=true,[188]=true,[190]=true,[1610]=true,[1629]=true,[1683]=true,[1718]=true,[1770]=true
 }
 
+-- Creatures that should not receive affix auras (vehicles, dummy, etc.)
 local IGNORE_BUFF_ENTRIES = {
-  [30172]=true,[30173]=true,[29630]=true,[28351]=true,[24137]=true,[37596]=true,[26499]=true,[27745]=true
+  [30172]=true,[30173]=true,[29630]=true,[28351]=true,[24137]=true,[37596]=true,[26499]=true,[27745]=true,[28922]=true,
+  [36772]=true,[36661]=true
 }
 
+--==========================================================
+-- Affix Pool & Color Tags (weekly rotation source)
+--==========================================================
 local WEEKLY_AFFIX_POOL = {
   [1] = {
     { spell = { 48441, 61301 },          name = "Rejuvenating"   },
@@ -76,6 +130,9 @@ local AFFIX_COLOR_MAP = {
   Resistant="|cffb0c4de", Rallying="|cffff8800"
 }
 
+--==========================================================
+-- DB/Simple Helpers & Small Formatters
+--==========================================================
 local function SafeDBQuery(q, ...)   return CharDBQuery(string.format(q, ...)) end
 local function SafeDBExecute(q, ...) return CharDBExecute(string.format(q, ...)) end
 local function Colorize(s, c)       return string.format("%s%s|r", c or "|cffffffff", s) end
@@ -90,6 +147,7 @@ end
 local function EncodeAffixIntId(tier, idx) return 300 + tier * 10 + idx end
 local function DecodeAffixIntId(intid) local code=intid-300; return math.floor(code/10), code%10 end
 
+-- Build a quick lookup of all affix spell IDs
 local ALL_AFFIX_SPELL_IDS = {}
 for _, tier in pairs(WEEKLY_AFFIX_POOL) do
   for _, affix in ipairs(tier) do
@@ -98,11 +156,15 @@ for _, tier in pairs(WEEKLY_AFFIX_POOL) do
   end
 end
 
+--==========================================================
+-- Weekly Affix Selection (randomized at runtime)
+--==========================================================
 local WEEKLY_AFFIXES = {}
 math.randomseed(os.time())
 for i=1,3 do local pool=WEEKLY_AFFIX_POOL[i]; if #pool>0 then table.insert(WEEKLY_AFFIXES, pool[math.random(#pool)]) end end
 
 local function GetAffixSet(tier)
+  -- Flatten spells from T1..tier into a single list
   local list = {}
   for i=1,tier do
     local affix = WEEKLY_AFFIXES[i]
@@ -134,6 +196,9 @@ local function RerollTierAffix(tier)
   local choice = pool[math.random(#pool)]; WEEKLY_AFFIXES[tier] = choice; return choice
 end
 
+--==========================================================
+-- Affix Aura Application Loop (buffs enemies around players)
+--==========================================================
 local function ApplyAuraToNearbyCreatures(player, affixes)
   local map = player:GetMap(); if not map then return end
   local seen = {}
@@ -169,6 +234,9 @@ local function StartAuraLoop(player, instanceId, mapId, affixes)
   MYTHIC_LOOP_HANDLERS[instanceId] = eventId
 end
 
+--==========================================================
+-- Rating & Rewards (gain/loss, items, next keys)
+--==========================================================
 local function UpdatePlayerRating(player, tier, deathCount, isSuccess)
   if not player then return end
   local guid, cfg = player:GetGUIDLow(), TIER_CONFIG[tier]; if not cfg then return end
@@ -202,6 +270,7 @@ local function AwardMythicPoints(player, tier, deathCount)
   player:SendBroadcastMessage(string.format("%sTier %d completed!|r Mythic+ mode has been ended for this dungeon run.\n%s\nNew Rating: %s%d|r",
     cfg.color, tier, msg, GetRatingColor(newRating), newRating))
 
+  -- Simple reward tiering by rating
   local itemId, count = 45624, 1
   if newRating > 1800 then itemId, count = 49426, 2
   elseif newRating > 1000 then itemId = 49426
@@ -209,6 +278,7 @@ local function AwardMythicPoints(player, tier, deathCount)
   player:AddItem(itemId, count)
   player:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Reward: |cffaaff00%s x%d|r", GetItemLink(itemId), count))
 
+  -- Grant next key up to T2/T3
   if tier < 3 then
     local nextKey = KEY_IDS[tier+1]; player:AddItem(nextKey, 1)
     player:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Tier %d Keystone granted!", tier+1))
@@ -226,20 +296,34 @@ local function PenalizeMythicFailure(player, tier, deathCount)
   local map = player:GetMap(); if map then MYTHIC_COMPLETION_STATE[map:GetInstanceId()] = "failed" end
 end
 
+--==========================================================
+-- Timer (timeout aura + expiry handler)
+--==========================================================
 local function ScheduleMythicTimeout(player, instanceId, tier)
   if not player then return end
   local cfg = TIER_CONFIG[tier]; if not cfg then return end
 
-  local duration = cfg.duration * 60000
   local auraId   = cfg.aura
   local guid     = player:GetGUIDLow()
 
+  -- base from tier
+  local minutes = cfg.duration
+
+  -- per-map/per-tier overrides
   local map = player:GetMap()
   if map then
     local mid = map:GetMapId()
-    if     mid == FORGE_OF_SOULS_MAP_ID      then duration = 15 * 60000
-    elseif mid == CULLING_OF_STRATHOLME_MAP_ID then duration = 30 * 60000 end
+    local ov = TIMER_OVERRIDES[mid]
+    if ov then
+      if ov.fixed then
+        minutes = ov.fixed
+      elseif ov.per_tier and ov.per_tier[tier] then
+        minutes = ov.per_tier[tier]
+      end
+    end
   end
+
+  local duration = minutes * 60000
 
   player:AddAura(auraId, player)
   local keepAuraEvent = CreateLuaEvent(function()
@@ -264,6 +348,9 @@ local function ScheduleMythicTimeout(player, instanceId, tier)
   end, duration, 1)
 end
 
+--==========================================================
+-- Gossip UI (Pedestal/NPC) — entry point for using keys
+--==========================================================
 local function GetPlayerRatingLine(player)
   local guid = player:GetGUIDLow()
   local q = SafeDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = %d", guid)
@@ -312,6 +399,7 @@ function Pedestal_OnGossipHello(_, player, creature)
   elseif completionState == "failed"    then player:GossipMenuAddItem(0, "|cffff0000You've failed, but try again in a different dungeon!|r", 0, 999)
   elseif MYTHIC_FLAG_TABLE[instanceId]  then player:GossipMenuAddItem(0, "|cff000000You're already in Mythic mode! Hurry! Go fight!|r", 0, 999)
   else
+    -- Compact weekly affix display (T1/T2/T3)
     local header = "|cff000000This Week's Mythic Affixes:|r"
     for tier=1,3 do
       local parts = {}
@@ -339,6 +427,7 @@ function Pedestal_OnGossipHello(_, player, creature)
   player:GossipSendMenu(1, creature)
 end
 
+-- full, closed function
 function Pedestal_OnGossipSelect(_, player, creature, _, intid)
   if intid == 999 then
     local map = player:GetMap()
@@ -380,11 +469,13 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     local instanceId, tier = map:GetInstanceId(), intid - 100
     local keyId = KEY_IDS[tier]
 
+    -- Pre-flight checks
     if MYTHIC_KILL_LOCK[instanceId] then player:SendBroadcastMessage("|cffff0000[Mythic]|r A creature was already killed. Reset the dungeon to use a keystone."); player:GossipComplete(); return end
     if MYTHIC_FLAG_TABLE[instanceId] then player:SendBroadcastMessage("|cffff0000Mythic mode has already been activated in this instance.|r"); player:GossipComplete(); return end
     if not player:HasItem(keyId) then player:SendBroadcastMessage("You do not have the required Tier " .. tier .. " Keystone."); player:GossipComplete(); return end
     if map:GetDifficulty() == 0 then player:SendBroadcastMessage("|cffff0000Mythic keys cannot be used in Normal mode dungeons.|r"); player:GossipComplete(); return end
 
+    -- Activate run
     local guid = player:GetGUIDLow()
     local affixes = GetAffixSet(tier)
     local cfg = TIER_CONFIG[tier]
@@ -406,7 +497,9 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     player:SendBroadcastMessage(string.format("%sTier %d Keystone|r inserted.\nAffixes: %s\nCurrent Rating: %s%d|r",
       cfg.color, tier, table.concat(names, ", "), GetRatingColor(cur), cur))
 
-    creature:SendUnitSay("Good luck... You'll need it.", 0)
+    -- Rating-based greeting
+    creature:SendUnitSay(GetPedestalGreetingByRating(cur), 0)
+
     player:RemoveItem(keyId, 1)
 
     ApplyAuraToNearbyCreatures(player, affixes)
@@ -425,6 +518,9 @@ end
 RegisterCreatureGossipEvent(PEDESTAL_NPC_ENTRY, 1, Pedestal_OnGossipHello)
 RegisterCreatureGossipEvent(PEDESTAL_NPC_ENTRY, 2, Pedestal_OnGossipSelect)
 
+--==========================================================
+-- Player Death Tracking (for rating penalties)
+--==========================================================
 RegisterPlayerEvent(8, function(_, killer, victim)
   if not victim or not victim:IsPlayer() then return end
   local map = victim:GetMap(); if not map or map:GetDifficulty() == 0 then return end
@@ -434,6 +530,9 @@ RegisterPlayerEvent(8, function(_, killer, victim)
   MYTHIC_DEATHS[instanceId][guid] = (MYTHIC_DEATHS[instanceId][guid] or 0) + 1
 end)
 
+--==========================================================
+-- Kill-Lock (prevent post-kill key insert)
+--==========================================================
 RegisterPlayerEvent(7, function(_, killer, victim)
   if not killer or not killer:IsPlayer() or not victim or victim:GetObjectType() ~= "Creature" then return end
   local map = killer:GetMap(); if not map or not map:IsDungeon() or map:GetDifficulty() < 1 then return end
@@ -448,6 +547,9 @@ RegisterPlayerEvent(7, function(_, killer, victim)
   for _, p in pairs(map:GetPlayers() or {}) do p:SendBroadcastMessage(msg) end
 end)
 
+--==========================================================
+-- Resume Logic (on login/relog inside instance)
+--==========================================================
 RegisterPlayerEvent(28, function(_, player)
   local map = player:GetMap(); if not map then return end
   local instanceId, mapId, guid = map:GetInstanceId(), map:GetMapId(), player:GetGUIDLow()
@@ -477,17 +579,24 @@ RegisterPlayerEvent(28, function(_, player)
   local cfg = TIER_CONFIG[tier]; if cfg and not player:HasAura(cfg.aura) then player:AddAura(cfg.aura, player) end
 end)
 
+--==========================================================
+-- Login Blurb (weekly affix display)
+--==========================================================
 RegisterPlayerEvent(3, function(_, player)
   local parts = {}
   for _, aff in ipairs(WEEKLY_AFFIXES) do table.insert(parts, (AFFIX_COLOR_MAP[aff.name] or "|cffffffff") .. aff.name .. "|r") end
   player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(parts, ", "))
 end)
 
+--===============================================================
+-- Command Handler (.simclean, .sim/.simulate, .mythicroll, etc.)
+--===============================================================
 RegisterPlayerEvent(42, function(_, player, command)
   if not player then return false end
   local cmd = command:lower():gsub("[#./]", "")
   local guid, now = player:GetGUIDLow(), os.time()
 
+  -- GM utility: removes nearby sim-spawned chests (temporary GOB)
   if cmd:sub(1,8) == "simclean" then
     if not player:IsGM() then
       player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
@@ -517,6 +626,7 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
+  -- GM: quickly spawn a chest anywhere (no rating/flags). Auto-despawns after 60s.
   if cmd:sub(1,3) == "sim" or cmd:sub(1,8) == "simulate" then
     if not player:IsGM() then
       player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
@@ -547,15 +657,25 @@ RegisterPlayerEvent(42, function(_, player, command)
     end
 
     local x, y, z, o = player:GetX(), player:GetY(), player:GetZ(), player:GetO()
-    local chest = PerformIngameSpawn(2, chestEntry, mapId, instanceId, x, y, z, o, false, 60000)
-    if chest and chest.DespawnOrUnsummon then
-      chest:DespawnOrUnsummon(60000)
+
+    -- Spawn unsaved (temp) chest; then schedule cleanup (GO-safe).
+    local chest = PerformIngameSpawn(2, chestEntry, mapId, instanceId, x, y, z, o, false)
+    if chest then
+      local guidLow = chest:GetGUIDLow()
+      CreateLuaEvent(function()
+        local go = GetGameObjectByGUID(guidLow)
+        if go then
+          if go.Despawn then go:Despawn() end
+          go:RemoveFromWorld()
+        end
+      end, 60000, 1)
     end
 
     player:SendBroadcastMessage(string.format("|cffffcc00[Mythic]|r Simulated chest spawned (Tier %d). Auto-despawns in 60s. No rating or tokens granted.", tier))
     return false
   end
 
+  -- GM: roll/set affixes
   if cmd:sub(1,10) == "mythicroll" then
     if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command."); return false end
     local tokens = {}; for w in cmd:gmatch("%S+") do table.insert(tokens, w) end
@@ -596,6 +716,7 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
+  -- Player: rating snapshot (rate-limited)
   if cmd == "mythicrating" then
     local last = __MYTHIC_RATING_COOLDOWN__[guid] or 0
     if now - last < COMMAND_COOLDOWN then player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes."); return false end
@@ -610,6 +731,7 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
+  -- Help / GM help
   if cmd == "mythichelp" then
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r Available commands:")
     player:SendBroadcastMessage("|cffffff00.mythicrating|r - View your Mythic+ rating and runs.")
@@ -630,6 +752,7 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
+  -- GM: global rating reset (two-step confirm)
   if cmd == "mythicreset" then
     if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
     else
@@ -639,7 +762,7 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
-  if cmd == "mythicresetconfirm" then
+  if cmd == "mythicresetconfirm" or cmd:match("^mythicreset%s+confirm$") then
     local pendingTime = __MYTHIC_RESET_PENDING__[guid]
     if not pendingTime or now - pendingTime > RESET_CONFIRM_TIMEOUT then
       player:SendBroadcastMessage("|cffff0000[Mythic]|r No reset pending or confirmation expired. Use |cff00ff00.mythicreset|r first.")
@@ -658,6 +781,9 @@ RegisterPlayerEvent(42, function(_, player, command)
   end
 end)
 
+--==========================================================
+-- Final Boss Kill Hook → Score/Reward/Chest/Cleanup
+--==========================================================
 for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
   local bossId = data.final
   if bossId then
@@ -670,12 +796,14 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
       local expired = MYTHIC_TIMER_EXPIRED[instanceId]
       local tier = MYTHIC_TIER_TABLE[instanceId] or 1
 
+      -- Snapshot deaths per player for rating calc
       local playerDeaths = {}
       for _, p in pairs(map:GetPlayers() or {}) do
         local g = p:GetGUIDLow()
         playerDeaths[g] = MYTHIC_DEATHS[instanceId] and MYTHIC_DEATHS[instanceId][g] or 0
       end
 
+      -- Award or fail message per player
       for _, p in pairs(map:GetPlayers() or {}) do
         if p:IsAlive() and p:IsInWorld() then
           if expired then
@@ -688,10 +816,11 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
         end
       end
 
+      -- Spawn chest behind boss if not expired
       if not expired then
         local x,y,z,o = creature:GetX(), creature:GetY(), creature:GetZ(), creature:GetO()
         x, y = x - math.cos(o) * 2, y - math.sin(o) * 2
-        SpawnMythicRewardChest(x, y, z, o, creature:GetMapId(), instanceId, tier)
+        SpawnMythicRewardChest(x, y, z, o, map, instanceId, tier)
       end
 
       RemoveAffixAurasFromAllCreatures(instanceId, map)
@@ -700,21 +829,27 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
   end
 end
 
-function SpawnMythicRewardChest(x, y, z, o, mapId, instanceId, tier)
+--==========================================================
+-- Chest Spawn (real run) — one per instance; faction swap on T2
+--==========================================================
+function SpawnMythicRewardChest(x, y, z, o, map, instanceId, tier)
   if MYTHIC_CHEST_SPAWNED[instanceId] then return end
   local chestEntry
   if tier == 2 then
-    local map, team = GetMapById(mapId), nil
-    if map then for _, p in pairs(map:GetPlayers() or {}) do if p:IsAlive() then team = p:GetTeam(); break end end end
+    local team
+    for _, p in pairs(map:GetPlayers() or {}) do if p:IsAlive() then team = p:GetTeam(); break end end
     chestEntry = (team == 1) and 900013 or 900011
   else
     chestEntry = CHEST_ENTRIES[tier] or CHEST_ENTRIES[1]
   end
-  PerformIngameSpawn(2, chestEntry, mapId, instanceId, x, y, z, o)
+  PerformIngameSpawn(2, chestEntry, map:GetMapId(), instanceId, x, y, z, o)
   MYTHIC_CHEST_SPAWNED[instanceId] = true
 end
 
-local function CleanupMythicInstance(instanceId)
+--==========================================================
+-- Cleanup (stop loops, clear flags, forget resume token)
+--==========================================================
+function CleanupMythicInstance(instanceId)
   if MYTHIC_LOOP_HANDLERS[instanceId] then RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId]); MYTHIC_LOOP_HANDLERS[instanceId] = nil end
   MYTHIC_FLAG_TABLE[instanceId], MYTHIC_AFFIXES_TABLE[instanceId], MYTHIC_REWARD_CHANCE_TABLE[instanceId] = nil, nil, nil
   MYTHIC_TIER_TABLE[instanceId], MYTHIC_DEATHS[instanceId], MYTHIC_TIMER_EXPIRED[instanceId], MYTHIC_KILL_LOCK[instanceId] = nil, nil, nil, nil
