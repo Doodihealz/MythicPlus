@@ -1,4 +1,4 @@
-DEVELOPMENT ON HOLD FOR NOW. GO CHECK OUT Huptiq's version of this mod instead! https://github.com/huptiq/MythicPlus
+I recommend checking out Huptiq's version of this mod too! https://github.com/huptiq/MythicPlus
 
 # Mythic+ Eluna Script for WotLK Azerothcore
 
