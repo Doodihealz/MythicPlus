@@ -114,7 +114,7 @@ Timers are always 15 minute or 30 minutes. Never more never less.
 | 3    | Emblem of Frost ×1 (49426)        |
 | 4    | Emblem of Frost ×2 (49426)        |
 
-Players receive their next-tier keystone **from the chest** (T1 → T2, T2 → T3).
+Players receive their next-tier keystone **from the script** (T1 → T2, T2 → T3).
 There's a Horde and Alliance version of the Tier 2 chest (Because ToC loot is faction bound 😒)
 
 ---
@@ -136,7 +136,7 @@ There's a Horde and Alliance version of the Tier 2 chest (Because ToC loot is fa
 | 2    | −6             | −20               |
 | 3    | −9             | −30               |
 
-Rating can’t fall below 0.  
+Rating cannot fall below 0.  
 No rewards if the timer expires. All buffs are removed.
 
 ---
@@ -183,7 +183,7 @@ No rewards if the timer expires. All buffs are removed.
 - Auto-detects kill activity and locks keystone use until reset
 - Saves persistent Mythic+ state for each player+instance
 - Handles aura removal on failure or wipe
-- Rating table is updated on boss kill or fail
+- Rating table is updated on final boss kill or timer fail
 - Resumes affix logic on re-login or zone-in
 - Global affix announcement on login (toggleable)
 - Death counter and timeout logic included
