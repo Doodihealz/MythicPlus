@@ -172,7 +172,7 @@ No rewards if the timer expires. All buffs are removed.
 | `.mythicroll all`        | Rerolls all current affixes     |
 | `.mythicroll tier <1-3>` | Reroll a specific tier     |
 | `.mythicroll tier <1-3> <affix>`   | Set a specific affix (e.g., resistant)     |
-| `.sim tier <1-3>`   | Spawn a Tier chest without awarding rating or tokens     |
+| `.sim tier <1-3>`   | Spawn a **temporary** Tier chest without awarding rating or tokens     |
 | `.simclean`   | Remove nearby sim-spawned chests (default radius 80)|
 
 ---
