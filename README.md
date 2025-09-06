@@ -178,6 +178,9 @@ No rewards if the timer expires. All buffs are removed.
 | `.mythicrating set <n> [player]`   | Manually set the mythic rating for you or someone else|
 
 ---
+Mythic rating command set example:
+- .mythicrating set 2000 Doodihealz
+- That would set player Doodihealz mythic rating value to 2000 regardless of what it was.
 
 ## Internal Features
 
