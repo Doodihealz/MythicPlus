@@ -162,7 +162,7 @@ No rewards if the timer expires. All buffs are removed.
 | `.mythicrating` | Show current Mythic Rating & run count     |
 | `.mythichelp`   | Displays list of Mythic+ commands          |
 | `.mythicaffix`  | Displays the current Mythic+ affixes       |
-
+| `.mythictimer`   | Shows the current affixes and how much time is remaining|
 ### GM-Only
 
 | Command                  | Description                                |
