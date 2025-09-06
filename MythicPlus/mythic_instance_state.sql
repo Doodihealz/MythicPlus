@@ -2,7 +2,7 @@
 -- Host:                         127.0.0.1
 -- Server version:               8.4.4 - MySQL Community Server - GPL
 -- Server OS:                    Win64
--- HeidiSQL Version:             12.10.0.7036
+-- HeidiSQL Version:             12.11.0.7082
 -- --------------------------------------------------------
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `character_mythic_instance_state` (
   `instance_id` int unsigned NOT NULL,
   `map_id` int unsigned NOT NULL,
   `tier` tinyint unsigned NOT NULL,
+  `affix_spells` text COLLATE utf8mb4_general_ci,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`guid`,`instance_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
