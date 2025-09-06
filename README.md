@@ -174,6 +174,8 @@ No rewards if the timer expires. All buffs are removed.
 | `.mythicroll tier <1-3> <affix>`   | Set a specific affix (e.g., resistant)     |
 | `.sim tier <1-3>`   | Spawn a **temporary** Tier chest without awarding rating or tokens     |
 | `.simclean`   | Remove nearby sim-spawned chests (default radius 80)|
+| `.mythiclbreset`   | Reset best-time leaderboards instantly|
+| `.mythicrating set <n> [player]`   | Manually set the mythic rating for you or someone else|
 
 ---
 
