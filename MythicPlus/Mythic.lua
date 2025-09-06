@@ -81,6 +81,8 @@ local MYTHIC_TIER_TABLE          = MYTHIC_TIER_TABLE          or {}
 local MYTHIC_COMPLETION_STATE    = MYTHIC_COMPLETION_STATE    or {} -- "active"/"completed"/"failed"
 local __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
 local __MYTHIC_RESET_PENDING__   = __MYTHIC_RESET_PENDING__   or {}
+local TIMER_COMMAND_COOLDOWN      = 300
+local __MYTHIC_TIMER_COOLDOWN__   = __MYTHIC_TIMER_COOLDOWN__ or {}
 
 local CleanupMythicInstance
 local SpawnMythicRewardChest
@@ -739,8 +741,16 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
-  -- Affix display + countdown
+-- Affix display + countdown (rate-limited per player)
 if cmd == "mythictimer" then
+  local last = __MYTHIC_TIMER_COOLDOWN__[guid] or 0
+  if now - last < TIMER_COMMAND_COOLDOWN then
+    local remain = TIMER_COMMAND_COOLDOWN - (now - last)
+    player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can use |cffffff00.mythictimer|r again in " .. FormatDurationShort(remain) .. ".")
+    return false
+  end
+  __MYTHIC_TIMER_COOLDOWN__[guid] = now
+
   local eta  = GetAffixRerollETA()
   local when = (eta > 0) and FormatDurationShort(eta) or "soon"
   player:SendBroadcastMessage("|cff66ccff[Mythic]|r Current affixes: " .. GetAffixNamesString(3))
@@ -860,7 +870,7 @@ end
   if cmd == "mythichelp" then
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r Available commands:")
     player:SendBroadcastMessage("|cffffff00.mythicrating|r - View your Mythic+ rating and runs.")
-    player:SendBroadcastMessage("|cffffff00.mythictimer|r - Current affixes & next reroll ETA.")
+    player:SendBroadcastMessage("|cffffff00.mythictimer|r - Current affixes & next reroll ETA (5 min cooldown).")
     player:SendBroadcastMessage("|cffffff00.mythichelp|r - Show this help menu.")
     if player:IsGM() then
       player:SendBroadcastMessage("|cffff6600GM note:|r You can also modify affixes by talking to the Mythic Pedestal NPC while GM mode is enabled.")
