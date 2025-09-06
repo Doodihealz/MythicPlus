@@ -402,29 +402,48 @@ local function ScheduleMythicTimeout(player, instanceId, tier)
   local minutes  = ComputeTierMinutes(map and map:GetMapId() or 0, tier)
   local duration = minutes * 60000
 
+  
   player:AddAura(auraId, player)
-  local keepAuraEvent = CreateLuaEvent(function()
-    local p = GetPlayerByGUID(guid)
-    if not p or not MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_TIMER_EXPIRED[instanceId] then return end
-    if not p:HasAura(auraId) then p:AddAura(auraId, p) end
-  end, 5000, 0)
 
-  CreateLuaEvent(function()
-    local p = GetPlayerByGUID(guid)
-    if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
-      local mapNow = p:GetMap()
-      MYTHIC_TIMER_EXPIRED[instanceId] = true
-      p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
-      MYTHIC_MODE_ENDED[instanceId] = true
-      if p:HasAura(auraId) then p:RemoveAura(auraId) end
-      MYTHIC_COMPLETION_STATE[instanceId] = "failed"
-      if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
-      CleanupMythicInstance(instanceId)
-    end
-    RemoveEventById(keepAuraEvent)
-  end, duration, 1)
+-- forward-declare event ids so closures can reference them safely
+local keepAuraEventId
+local expireEventId
+
+keepAuraEventId = CreateLuaEvent(function()
+  local p = GetPlayerByGUID(guid)
+  if not p or not MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_TIMER_EXPIRED[instanceId] then return end
+
+  -- tamper: aura missing -> fail immediately
+  if not p:HasAura(auraId) then
+    MYTHIC_TIMER_EXPIRED[instanceId] = true
+    MYTHIC_MODE_ENDED[instanceId]    = true
+    p:SendBroadcastMessage("|cffff0000[Mythic]|r Timer aura removed; run failed.")
+    MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+    local mapNow = p:GetMap()
+    if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
+
+    if keepAuraEventId then RemoveEventById(keepAuraEventId); keepAuraEventId = nil end
+    if expireEventId   then RemoveEventById(expireEventId);   expireEventId   = nil end
+    CleanupMythicInstance(instanceId)
+    return
+  end
+end, 5000, 0)
+
+expireEventId = CreateLuaEvent(function()
+  local p = GetPlayerByGUID(guid)
+  if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+    local mapNow = p:GetMap()
+    MYTHIC_TIMER_EXPIRED[instanceId]   = true
+    p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
+    MYTHIC_MODE_ENDED[instanceId]      = true
+    if p:HasAura(auraId) then p:RemoveAura(auraId) end
+    MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+    if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
+    CleanupMythicInstance(instanceId)
+  end
+  if keepAuraEventId then RemoveEventById(keepAuraEventId); keepAuraEventId = nil end
+end, duration, 1)
 end
-
 --==========================================================
 -- Gossip UI (Pedestal/NPC) — entry point for using keys
 --==========================================================
@@ -678,31 +697,48 @@ RegisterPlayerEvent(28, function(_, player)
     if auraId ~= 0 and player:HasAura(auraId) then player:RemoveAura(auraId) end
     CleanupMythicInstance(instanceId)
   else
-    if auraId ~= 0 and not player:HasAura(auraId) then player:AddAura(auraId, player) end
-    local keepAuraEvent = CreateLuaEvent(function()
-      local p = GetPlayerByGUID(guid)
-      if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] and auraId ~= 0 and not p:HasAura(auraId) then
-        p:AddAura(auraId, p)
-      end
-    end, 5000, 0)
+  if auraId ~= 0 and not player:HasAura(auraId) then player:AddAura(auraId, player) end
 
-    CreateLuaEvent(function()
-      local p = GetPlayerByGUID(guid)
-      if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
-        local mapNow = p:GetMap()
-        MYTHIC_TIMER_EXPIRED[instanceId] = true
-        p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
-        MYTHIC_MODE_ENDED[instanceId] = true
-        if auraId ~= 0 and p:HasAura(auraId) then p:RemoveAura(auraId) end
-        MYTHIC_COMPLETION_STATE[instanceId] = "failed"
-        if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
-        CleanupMythicInstance(instanceId)
-      end
-      RemoveEventById(keepAuraEvent)
-    end, remaining * 1000, 1)
-  end
+  -- forward-declare event ids so both closures can cancel safely
+  local keepAuraEventId
+  local expireEventId
+
+  keepAuraEventId = CreateLuaEvent(function()
+    local p = GetPlayerByGUID(guid)
+    if not p or not MYTHIC_FLAG_TABLE[instanceId] or MYTHIC_TIMER_EXPIRED[instanceId] then return end
+
+    -- tamper: aura missing -> fail immediately
+    if auraId ~= 0 and not p:HasAura(auraId) then
+      MYTHIC_TIMER_EXPIRED[instanceId] = true
+      MYTHIC_MODE_ENDED[instanceId]    = true
+      p:SendBroadcastMessage("|cffff0000[Mythic]|r Timer aura removed; run failed.")
+      MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+      local mapNow = p:GetMap()
+      if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
+
+      if keepAuraEventId then RemoveEventById(keepAuraEventId); keepAuraEventId = nil end
+      if expireEventId   then RemoveEventById(expireEventId);   expireEventId   = nil end
+      CleanupMythicInstance(instanceId)
+      return
+    end
+  end, 5000, 0)
+
+  expireEventId = CreateLuaEvent(function()
+    local p = GetPlayerByGUID(guid)
+    if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+      local mapNow = p:GetMap()
+      MYTHIC_TIMER_EXPIRED[instanceId]   = true
+      p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
+      MYTHIC_MODE_ENDED[instanceId]      = true
+      if auraId ~= 0 and p:HasAura(auraId) then p:RemoveAura(auraId) end
+      MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+      if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
+      CleanupMythicInstance(instanceId)
+    end
+    if keepAuraEventId then RemoveEventById(keepAuraEventId); keepAuraEventId = nil end
+  end, remaining * 1000, 1)
+end
 end)
-
 --==========================================================
 -- Login Blurb (affixes + ETA)
 --==========================================================
