@@ -1,65 +1,138 @@
 --[[
 ===========================================================
- Mythic+ System for WotLK
+ Mythic+ System for WotLK (Eluna)
  Author: Doodihealz
+ Notes:
+  - Auto re-rolls affixes every 6 hours.
+  - Mid-run protection: affix spell list is snapshotted & persisted per instance.
+  - Countdown/ETA shown in chat commands, gossip, and login blurb.
 ===========================================================
 ]]
 
 print("[Mythic] Mythic script loaded successfully! Enjoy!")
-dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/Generic/MythicPlus/MythicBosses.lua")
+dofile("C:/Build/bin/RelWithDebInfo/lua_scripts/MythicPlus/MythicBosses.lua")
 
 --==========================================================
 -- Config & Constants
 --==========================================================
-local PEDESTAL_NPC_ENTRY        = 900001
-local MYTHIC_SCAN_RADIUS        = 500
-local SLOTS                     = 6
-local RATING_CAP                = 2000
-local AURA_LOOP_INTERVAL        = 6000           -- ms; affix aura re-apply cadence
-local COMMAND_COOLDOWN          = 300            -- seconds; .mythicrating cooldown
-local RESET_CONFIRM_TIMEOUT     = 30             -- seconds; GM reset confirm window
-local INSTANCE_STATE_TIMEOUT    = 7200           -- seconds; resume window after DC/relog
-local FORGE_OF_SOULS_MAP_ID     = 632
+local PEDESTAL_NPC_ENTRY         = 900001
+local MYTHIC_SCAN_RADIUS         = 500
+local RATING_CAP                 = 2000
+local AURA_LOOP_INTERVAL         = 6000   -- ms; affix aura re-apply cadence
+local COMMAND_COOLDOWN           = 300    -- seconds; .mythicrating cooldown
+local RESET_CONFIRM_TIMEOUT      = 30     -- seconds; GM reset confirm window
+local INSTANCE_STATE_TIMEOUT     = 7200   -- seconds; resume window after DC/relog
+local FORGE_OF_SOULS_MAP_ID      = 632
 local CULLING_OF_STRATHOLME_MAP_ID = 595
-local AHN_KAHET_MAP_ID           = 619   -- Ahn'kahet: The Old Kingdom
-local VIOLET_HOLD_MAP_ID         = 608   -- The Violet Hold
+local AHN_KAHET_MAP_ID           = 619
+local VIOLET_HOLD_MAP_ID         = 608
 
---=======================================================================================
--- Overrides the timer and applies specific times to specific dungeons based on key used.
---=======================================================================================
+--==========================================================
+-- Timer / Reroll Scheduler (global)
+--==========================================================
+local AFFIX_REROLL_INTERVAL_MS = 6 * 60 * 60 * 1000          -- 6h
+local NEXT_AFFIX_REROLL_AT     = os.time() + (AFFIX_REROLL_INTERVAL_MS / 1000)
+local AUTO_REROLL_EVENT_ID     = nil
+
+-- Forward decl so ResetAffixCountdown can reference it
+local AutoRerollAffixes
+
+local function ResetAffixCountdown()
+  -- Push the countdown to 6h from now and reschedule the repeating event
+  NEXT_AFFIX_REROLL_AT = os.time() + (AFFIX_REROLL_INTERVAL_MS / 1000)
+  if AUTO_REROLL_EVENT_ID then RemoveEventById(AUTO_REROLL_EVENT_ID) end
+  AUTO_REROLL_EVENT_ID = CreateLuaEvent(AutoRerollAffixes, AFFIX_REROLL_INTERVAL_MS, 0)
+end
+
+--==========================================================
+-- Per-map Timer Overrides
+--==========================================================
 local TIMER_OVERRIDES = {
-  -- Always-30 min regardless of tier
-  [AHN_KAHET_MAP_ID] = { fixed = 30 },
-
-  -- Always-15 min regardless of tier
-  [FORGE_OF_SOULS_MAP_ID] = { fixed = 15 },
-
-  -- Always-30 min regardless of tier
-  [CULLING_OF_STRATHOLME_MAP_ID] = { fixed = 30 },
-
-  -- Per-tier: VH T1=15, T2/T3=30
-  [VIOLET_HOLD_MAP_ID] = { per_tier = { [1]=15, [2]=30, [3]=30 } },
+  [AHN_KAHET_MAP_ID]            = { fixed = 30 },                   -- Always 30 minutes
+  [FORGE_OF_SOULS_MAP_ID]       = { fixed = 15 },                   -- Always 15 minutes
+  [CULLING_OF_STRATHOLME_MAP_ID]= { fixed = 30 },                   -- Always 30 minutes
+  [VIOLET_HOLD_MAP_ID]          = { per_tier = { [1]=15, [2]=30, [3]=30 } }, -- VH: T1=15, T2/T3=30
 }
+
+local function ComputeTierMinutes(mapId, tier)
+  local minutes = (tier and tier >= 1 and tier <= 3) and ( {15,30,30} )[tier ] or 15
+  local ov = TIMER_OVERRIDES[mapId]
+  if ov then
+    if ov.fixed then minutes = ov.fixed
+    elseif ov.per_tier and ov.per_tier[tier] then minutes = ov.per_tier[tier] end
+  end
+  return minutes
+end
 
 --==========================================================
 -- Runtime State (per-instance / persistent helpers)
 --==========================================================
-local MYTHIC_TIMER_EXPIRED      = MYTHIC_TIMER_EXPIRED or {}
-local MYTHIC_KILL_LOCK          = MYTHIC_KILL_LOCK or {}     -- prevents key after any mob kill
-local MYTHIC_DEATHS             = MYTHIC_DEATHS or {}        -- per-instance per-player deaths
-local MYTHIC_FLAG_TABLE         = MYTHIC_FLAG_TABLE or {}    -- run active flag
-local MYTHIC_AFFIXES_TABLE      = MYTHIC_AFFIXES_TABLE or {} -- run affix spell list
-local MYTHIC_REWARD_CHANCE_TABLE= MYTHIC_REWARD_CHANCE_TABLE or {}
-local MYTHIC_CHEST_SPAWNED      = MYTHIC_CHEST_SPAWNED or {} -- prevent duplicate chest
-local MYTHIC_FINAL_BOSSES       = MYTHIC_FINAL_BOSSES or {}  -- set in MythicBosses.lua
-local MYTHIC_MODE_ENDED         = MYTHIC_MODE_ENDED or {}
-local MYTHIC_LOOP_HANDLERS      = MYTHIC_LOOP_HANDLERS or {} -- aura loop event ids
-local MYTHIC_TIER_TABLE         = MYTHIC_TIER_TABLE or {}
-local MYTHIC_COMPLETION_STATE   = MYTHIC_COMPLETION_STATE or {} -- "active"/"completed"/"failed"
-local __MYTHIC_RATING_COOLDOWN__= __MYTHIC_RATING_COOLDOWN__ or {}
-local __MYTHIC_RESET_PENDING__  = __MYTHIC_RESET_PENDING__ or {}
+local MYTHIC_TIMER_EXPIRED       = MYTHIC_TIMER_EXPIRED       or {}
+local MYTHIC_KILL_LOCK           = MYTHIC_KILL_LOCK           or {} -- prevents key after any mob kill
+local MYTHIC_DEATHS              = MYTHIC_DEATHS              or {} -- per-instance per-player deaths
+local MYTHIC_FLAG_TABLE          = MYTHIC_FLAG_TABLE          or {} -- run active flag
+local MYTHIC_AFFIXES_TABLE       = MYTHIC_AFFIXES_TABLE       or {} -- run affix spell list
+local MYTHIC_REWARD_CHANCE_TABLE = MYTHIC_REWARD_CHANCE_TABLE or {}
+local MYTHIC_CHEST_SPAWNED       = MYTHIC_CHEST_SPAWNED       or {} -- prevent duplicate chest
+local MYTHIC_FINAL_BOSSES        = MYTHIC_FINAL_BOSSES        or {} -- set in MythicBosses.lua
+local MYTHIC_MODE_ENDED          = MYTHIC_MODE_ENDED          or {}
+local MYTHIC_LOOP_HANDLERS       = MYTHIC_LOOP_HANDLERS       or {} -- aura loop event ids
+local MYTHIC_TIER_TABLE          = MYTHIC_TIER_TABLE          or {}
+local MYTHIC_COMPLETION_STATE    = MYTHIC_COMPLETION_STATE    or {} -- "active"/"completed"/"failed"
+local __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
+local __MYTHIC_RESET_PENDING__   = __MYTHIC_RESET_PENDING__   or {}
+
 local CleanupMythicInstance
 local SpawnMythicRewardChest
+
+--==========================================================
+-- Small Helpers & Formatting
+--==========================================================
+local function SafeDBQuery(q, ...)   return CharDBQuery(string.format(q, ...)) end
+local function SafeDBExecute(q, ...) return CharDBExecute(string.format(q, ...)) end
+local function Colorize(s, c)        return string.format("%s%s|r", c or "|cffffffff", s) end
+
+local function GetRatingColor(r)
+  if r >= 1800 then return "|cffff8000"
+  elseif r >= 1000 then return "|cffa335ee"
+  elseif r >= 500  then return "|cff0070dd"
+  else return "|cff1eff00" end
+end
+
+local function EncodeAffixIntId(tier, idx) return 300 + tier * 10 + idx end
+local function DecodeAffixIntId(intid) local code=intid-300; return math.floor(code/10), code%10 end
+
+local function SerializeAffixes(spellList)
+  if not spellList or #spellList == 0 then return "" end
+  local t = {}
+  for _, id in ipairs(spellList) do t[#t+1] = tostring(id) end
+  return table.concat(t, ",")
+end
+
+local function ParseAffixes(str)
+  local out = {}
+  if not str or str == "" then return out end
+  for num in string.gmatch(str, "([^,%s]+)") do
+    local n = tonumber(num)
+    if n then out[#out+1] = n end
+  end
+  return out
+end
+
+local function FormatDurationShort(sec)
+  if sec < 0 then sec = 0 end
+  local d = math.floor(sec / 86400); sec = sec % 86400
+  local h = math.floor(sec / 3600);  sec = sec % 3600
+  local m = math.floor(sec / 60);    sec = sec % 60
+  if d > 0 then return string.format("%dd %dh %dm", d, h, m)
+  elseif h > 0 then return string.format("%dh %dm %ds", h, m, sec)
+  elseif m > 0 then return string.format("%dm %ds", m, sec)
+  else return string.format("%ds", sec) end
+end
+
+local function GetAffixRerollETA()
+  return math.max(0, (NEXT_AFFIX_REROLL_AT or 0) - os.time())
+end
 
 local function GetPedestalGreetingByRating(r)
   if r >= 1800 then
@@ -73,37 +146,38 @@ local function GetPedestalGreetingByRating(r)
   end
 end
 
--- Tier properties: gains/losses, timer, aura indicator, color tag
+--==========================================================
+-- Tier Settings / Rewards
+--==========================================================
 local TIER_CONFIG = {
   [1] = { rating_gain = 20, rating_loss = 3, timeout_penalty = 10, duration = 15, aura = 26013, color = "|cff0070dd" },
   [2] = { rating_gain = 40, rating_loss = 6, timeout_penalty = 20, duration = 30, aura = 71041, color = "|cffa335ee" },
   [3] = { rating_gain = 60, rating_loss = 9, timeout_penalty = 30, duration = 30, aura = 71041, color = "|cffff8000" }
 }
 
--- Keys/Chests/Icons
-local KEY_IDS        = { [1] = 900100, [2] = 900101, [3] = 900102 }
-local CHEST_ENTRIES  = { [1] = 900010, [2] = 900011, [3] = 900012 }
+local KEY_IDS       = { [1] = 900100, [2] = 900101, [3] = 900102 }
+local CHEST_ENTRIES = { [1] = 900010, [2] = 900011, [3] = 900012 }
 local ICONS = {
   [1] = "Interface\\Icons\\INV_Enchant_AbyssCrystal",
   [2] = "Interface\\Icons\\INV_Enchant_VoidCrystal",
   [3] = "Interface\\Icons\\INV_Enchant_NexusCrystal"
 }
 
--- Faction/entry filters for buffing and kill-lock logic
-local MYTHIC_HOSTILE_FACTIONS = { [16] = true, [21] = true, [1885] = true }
+--==========================================================
+-- Kill/Target Filters
+--==========================================================
+local MYTHIC_HOSTILE_FACTIONS = { [16]=true, [21]=true, [1885]=true }
 local FRIENDLY_FACTIONS = {
   [1]=true,[2]=true,[3]=true,[4]=true,[5]=true,[6]=true,[14]=true,[31]=true,[35]=true,
   [114]=true,[115]=true,[116]=true,[188]=true,[190]=true,[1610]=true,[1629]=true,[1683]=true,[1718]=true,[1770]=true
 }
-
--- Creatures that should not receive affix auras (vehicles, dummy, etc.)
 local IGNORE_BUFF_ENTRIES = {
   [30172]=true,[30173]=true,[29630]=true,[28351]=true,[24137]=true,[37596]=true,[26499]=true,[27745]=true,[28922]=true,
   [36772]=true,[36661]=true
 }
 
 --==========================================================
--- Affix Pool & Color Tags (weekly rotation source)
+-- Affix Pools / Colors
 --==========================================================
 local WEEKLY_AFFIX_POOL = {
   [1] = {
@@ -130,24 +204,7 @@ local AFFIX_COLOR_MAP = {
   Resistant="|cffb0c4de", Rallying="|cffff8800"
 }
 
---==========================================================
--- DB/Simple Helpers & Small Formatters
---==========================================================
-local function SafeDBQuery(q, ...)   return CharDBQuery(string.format(q, ...)) end
-local function SafeDBExecute(q, ...) return CharDBExecute(string.format(q, ...)) end
-local function Colorize(s, c)       return string.format("%s%s|r", c or "|cffffffff", s) end
-
-local function GetRatingColor(r)
-  if r >= 1800 then return "|cffff8000"
-  elseif r >= 1000 then return "|cffa335ee"
-  elseif r >= 500  then return "|cff0070dd"
-  else return "|cff1eff00" end
-end
-
-local function EncodeAffixIntId(tier, idx) return 300 + tier * 10 + idx end
-local function DecodeAffixIntId(intid) local code=intid-300; return math.floor(code/10), code%10 end
-
--- Build a quick lookup of all affix spell IDs
+-- Build a quick lookup of all affix spell IDs (if needed later)
 local ALL_AFFIX_SPELL_IDS = {}
 for _, tier in pairs(WEEKLY_AFFIX_POOL) do
   for _, affix in ipairs(tier) do
@@ -157,16 +214,18 @@ for _, tier in pairs(WEEKLY_AFFIX_POOL) do
 end
 
 --==========================================================
--- Weekly Affix Selection (randomized at runtime)
+-- Weekly Affixes (randomized on load)
 --==========================================================
 local WEEKLY_AFFIXES = {}
-math.randomseed(os.time())
-for i=1,3 do local pool=WEEKLY_AFFIX_POOL[i]; if #pool>0 then table.insert(WEEKLY_AFFIXES, pool[math.random(#pool)]) end end
+math.randomseed(os.time()); math.random(); math.random(); math.random()
+for i = 1, 3 do
+  local pool = WEEKLY_AFFIX_POOL[i]
+  if #pool > 0 then table.insert(WEEKLY_AFFIXES, pool[math.random(#pool)]) end
+end
 
 local function GetAffixSet(tier)
-  -- Flatten spells from T1..tier into a single list
   local list = {}
-  for i=1,tier do
+  for i = 1, tier do
     local affix = WEEKLY_AFFIXES[i]
     if affix then
       local spells = type(affix.spell) == "table" and affix.spell or { affix.spell }
@@ -178,8 +237,9 @@ end
 
 local function GetAffixNamesString(maxTier)
   local parts = {}
-  for t=1,(maxTier or 3) do
-    local aff = WEEKLY_AFFIXES[t]; local color = aff and (AFFIX_COLOR_MAP[aff.name] or "|cffffffff") or "|cffffffff"
+  for t = 1, (maxTier or 3) do
+    local aff = WEEKLY_AFFIXES[t]
+    local color = aff and (AFFIX_COLOR_MAP[aff.name] or "|cffffffff") or "|cffffffff"
     table.insert(parts, string.format("|cffffff00T%d|r: %s%s|r", t, color, aff and aff.name or "None"))
   end
   return table.concat(parts, "  ")
@@ -192,9 +252,32 @@ local function FindAffixByNameInTier(tier, nameLower)
 end
 
 local function RerollTierAffix(tier)
-  local pool = WEEKLY_AFFIX_POOL[tier]; if not pool or #pool==0 then return nil end
-  local choice = pool[math.random(#pool)]; WEEKLY_AFFIXES[tier] = choice; return choice
+  local pool = WEEKLY_AFFIX_POOL[tier]; if not pool or #pool == 0 then return nil end
+  local choice = pool[math.random(#pool)]
+  WEEKLY_AFFIXES[tier] = choice
+  return choice
 end
+
+--==========================================================
+-- Auto Reroll (every 6h) – does NOT affect active runs
+--==========================================================
+AutoRerollAffixes = function()
+  local old = {
+    WEEKLY_AFFIXES[1] and WEEKLY_AFFIXES[1].name or "None",
+    WEEKLY_AFFIXES[2] and WEEKLY_AFFIXES[2].name or "None",
+    WEEKLY_AFFIXES[3] and WEEKLY_AFFIXES[3].name or "None"
+  }
+  for t = 1, 3 do RerollTierAffix(t) end
+  NEXT_AFFIX_REROLL_AT = os.time() + (AFFIX_REROLL_INTERVAL_MS / 1000)
+  SendWorldMessage(string.format(
+    "|cffffcc00[Mythic]|r Affixes have rotated (auto): T1 %s -> %s, T2 %s -> %s, T3 %s -> %s. Next in ~%s.",
+    old[1], WEEKLY_AFFIXES[1].name, old[2], WEEKLY_AFFIXES[2].name, old[3], WEEKLY_AFFIXES[3].name,
+    FormatDurationShort(GetAffixRerollETA())
+  ))
+end
+
+-- Start initial repeating auto-reroll
+AUTO_REROLL_EVENT_ID = CreateLuaEvent(AutoRerollAffixes, AFFIX_REROLL_INTERVAL_MS, 0)
 
 --==========================================================
 -- Affix Aura Application Loop (buffs enemies around players)
@@ -203,12 +286,14 @@ local function ApplyAuraToNearbyCreatures(player, affixes)
   local map = player:GetMap(); if not map then return end
   local seen = {}
   for _, creature in pairs(player:GetCreaturesInRange(MYTHIC_SCAN_RADIUS)) do
-    local guid = creature:GetGUIDLow()
+    local guid   = creature:GetGUIDLow()
     local faction, entry = creature:GetFaction(), creature:GetEntry()
     if not seen[guid] and creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer() then
-      if not IGNORE_BUFF_ENTRIES[entry] and (not FRIENDLY_FACTIONS[faction] or entry==26861 or creature:GetName()=="King Ymiron") then
+      if not IGNORE_BUFF_ENTRIES[entry] and (not FRIENDLY_FACTIONS[faction] or entry == 26861 or creature:GetName() == "King Ymiron") then
         seen[guid] = true
-        for _, spellId in ipairs(affixes) do if not creature:HasAura(spellId) then creature:CastSpell(creature, spellId, true) end end
+        for _, spellId in ipairs(affixes) do
+          if not creature:HasAura(spellId) then creature:CastSpell(creature, spellId, true) end
+        end
       end
     end
   end
@@ -219,7 +304,9 @@ local function RemoveAffixAurasFromAllCreatures(instanceId, map)
   local affixes = MYTHIC_AFFIXES_TABLE[instanceId]; if not affixes then return end
   for _, creature in pairs(map:GetCreatures()) do
     if creature:IsAlive() and creature:IsInWorld() and not creature:IsPlayer() then
-      for _, spellId in ipairs(affixes) do if creature:HasAura(spellId) then creature:RemoveAura(spellId) end end
+      for _, spellId in ipairs(affixes) do
+        if creature:HasAura(spellId) then creature:RemoveAura(spellId) end
+      end
     end
   end
 end
@@ -229,13 +316,15 @@ local function StartAuraLoop(player, instanceId, mapId, affixes)
   if MYTHIC_LOOP_HANDLERS[instanceId] then RemoveEventById(MYTHIC_LOOP_HANDLERS[instanceId]) end
   local eventId = CreateLuaEvent(function()
     local p = GetPlayerByGUID(guid)
-    if p and p:GetMapId()==mapId and MYTHIC_FLAG_TABLE[instanceId] then ApplyAuraToNearbyCreatures(p, affixes) end
+    if p and p:GetMapId() == mapId and MYTHIC_FLAG_TABLE[instanceId] then
+      ApplyAuraToNearbyCreatures(p, affixes)
+    end
   end, AURA_LOOP_INTERVAL, 0)
   MYTHIC_LOOP_HANDLERS[instanceId] = eventId
 end
 
 --==========================================================
--- Rating & Rewards (gain/loss, items, next keys)
+-- Rating & Rewards
 --==========================================================
 local function UpdatePlayerRating(player, tier, deathCount, isSuccess)
   if not player then return end
@@ -250,7 +339,7 @@ local function UpdatePlayerRating(player, tier, deathCount, isSuccess)
     local timeoutPenalty, deathPenalty = cfg.timeout_penalty, cfg.rating_loss * (deathCount or 0)
     new = math.max(current - timeoutPenalty - deathPenalty, 0)
   end
-  local claims = {0,0,0}; if isSuccess then claims[tier]=1 end
+  local claims = {0,0,0}; if isSuccess then claims[tier] = 1 end
   SafeDBExecute([[
     INSERT INTO character_mythic_rating (guid,total_runs,total_points,claimed_tier1,claimed_tier2,claimed_tier3,last_updated)
     VALUES (%d,1,%d,%d,%d,%d,FROM_UNIXTIME(%d))
@@ -265,9 +354,11 @@ local function AwardMythicPoints(player, tier, deathCount)
   local newRating, prev = UpdatePlayerRating(player, tier, deathCount, true); if not newRating then return end
   local cfg, deathPenalty = TIER_CONFIG[tier], TIER_CONFIG[tier].rating_loss * (deathCount or 0)
   local actualGain = newRating - prev + deathPenalty
-  local msg = (actualGain == 0) and "|cffffcc00No rating added because you are rating capped!|r"
-    or string.format("|cff00ff00Gained +%d rating|r%s", actualGain, (deathCount>0 and string.format(" |cffff0000(-%d from deaths)|r", deathPenalty) or ""))
-  player:SendBroadcastMessage(string.format("%sTier %d completed!|r Mythic+ mode has been ended for this dungeon run.\n%s\nNew Rating: %s%d|r",
+  local msg = (actualGain == 0) and "|cffffcc00No rating added because you are rating capped|r"
+    or string.format("|cff00ff00Gained +%d rating|r%s", actualGain, (deathCount > 0 and string.format(" |cffff0000(-%d from deaths)|r", deathPenalty) or ""))
+
+  player:SendBroadcastMessage(string.format(
+    "%sTier %d completed!|r Mythic+ mode has been ended for this dungeon run.\n%s\nNew Rating: %s%d|r",
     cfg.color, tier, msg, GetRatingColor(newRating), newRating))
 
   -- Simple reward tiering by rating
@@ -280,8 +371,8 @@ local function AwardMythicPoints(player, tier, deathCount)
 
   -- Grant next key up to T2/T3
   if tier < 3 then
-    local nextKey = KEY_IDS[tier+1]; player:AddItem(nextKey, 1)
-    player:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Tier %d Keystone granted!", tier+1))
+    local nextKey = KEY_IDS[tier + 1]; player:AddItem(nextKey, 1)
+    player:SendBroadcastMessage(string.format("|cffffff00[Mythic]|r Tier %d Keystone granted!", tier + 1))
   end
 
   local map = player:GetMap(); if map then MYTHIC_COMPLETION_STATE[map:GetInstanceId()] = "completed" end
@@ -305,24 +396,8 @@ local function ScheduleMythicTimeout(player, instanceId, tier)
 
   local auraId   = cfg.aura
   local guid     = player:GetGUIDLow()
-
-  -- base from tier
-  local minutes = cfg.duration
-
-  -- per-map/per-tier overrides
-  local map = player:GetMap()
-  if map then
-    local mid = map:GetMapId()
-    local ov = TIMER_OVERRIDES[mid]
-    if ov then
-      if ov.fixed then
-        minutes = ov.fixed
-      elseif ov.per_tier and ov.per_tier[tier] then
-        minutes = ov.per_tier[tier]
-      end
-    end
-  end
-
+  local map      = player:GetMap()
+  local minutes  = ComputeTierMinutes(map and map:GetMapId() or 0, tier)
   local duration = minutes * 60000
 
   player:AddAura(auraId, player)
@@ -361,9 +436,9 @@ end
 
 local function Gossip_ShowAffixTierMenu(player, creature, tier)
   player:GossipClearMenu()
-  local current    = WEEKLY_AFFIXES[tier]
-  local currentName= current and current.name or "None"
-  local header     = string.format("|cffffff00Tier %d Affix|r\nCurrent: %s", tier, Colorize(currentName, AFFIX_COLOR_MAP[currentName]))
+  local current     = WEEKLY_AFFIXES[tier]
+  local currentName = current and current.name or "None"
+  local header      = string.format("|cffffff00Tier %d Affix|r\nCurrent: %s", tier, Colorize(currentName, AFFIX_COLOR_MAP[currentName]))
   player:GossipMenuAddItem(0, header, 0, 999)
   local pool = WEEKLY_AFFIX_POOL[tier] or {}
   for i, aff in ipairs(pool) do
@@ -379,9 +454,11 @@ end
 local function Gossip_ShowAffixRootMenu(player, creature)
   player:GossipClearMenu()
   player:GossipMenuAddItem(0, "|cffff6600Change Mythic affixes|r", 0, 999)
-  for t=1,3 do
-    local aff = WEEKLY_AFFIXES[t]; local name = aff and aff.name or "None"; local color = AFFIX_COLOR_MAP[name] or "|cffffffff"
-    local tid = (t==1 and 211) or (t==2 and 212) or 213
+  for t = 1, 3 do
+    local aff   = WEEKLY_AFFIXES[t]
+    local name  = aff and aff.name or "None"
+    local color = AFFIX_COLOR_MAP[name] or "|cffffffff"
+    local tid   = (t == 1 and 211) or (t == 2 and 212) or 213
     player:GossipMenuAddItem(0, string.format("Tier %d (current: %s%s|r)", t, color, name), 0, tid)
   end
   player:GossipMenuAddItem(0, "Go back", 0, 290)
@@ -395,20 +472,25 @@ function Pedestal_OnGossipHello(_, player, creature)
   player:GossipMenuAddItem(0, GetPlayerRatingLine(player), 0, 999)
 
   local completionState = MYTHIC_COMPLETION_STATE[instanceId]
-  if     completionState == "completed" then player:GossipMenuAddItem(0, "|cff00ff00Good job, Mythic Champion! You've conquered this challenge!|r", 0, 999)
-  elseif completionState == "failed"    then player:GossipMenuAddItem(0, "|cffff0000You've failed, but try again in a different dungeon!|r", 0, 999)
-  elseif MYTHIC_FLAG_TABLE[instanceId]  then player:GossipMenuAddItem(0, "|cff000000You're already in Mythic mode! Hurry! Go fight!|r", 0, 999)
+  if completionState == "completed" then
+    player:GossipMenuAddItem(0, "|cff00ff00Good job, Mythic Champion! You've conquered this challenge!|r", 0, 999)
+  elseif completionState == "failed" then
+    player:GossipMenuAddItem(0, "|cffff0000You've failed, but try again in a different dungeon!|r", 0, 999)
+  elseif MYTHIC_FLAG_TABLE[instanceId] then
+    player:GossipMenuAddItem(0, "|cff000000You're already in Mythic mode! Hurry! Go fight!|r", 0, 999)
   else
-    -- Compact weekly affix display (T1/T2/T3)
+    -- Compact weekly affix display (T1/T2/T3) + ETA
     local header = "|cff000000This Week's Mythic Affixes:|r"
-    for tier=1,3 do
+    for tier = 1, 3 do
       local parts = {}
-      for i=1,tier do
+      for i = 1, tier do
         local aff = WEEKLY_AFFIXES[i]
         if aff then table.insert(parts, (AFFIX_COLOR_MAP[aff.name] or "|cffffffff") .. aff.name .. "|r") end
       end
       header = header .. "\n|cff000000T" .. tier .. ":|r " .. table.concat(parts, "|cff000000, |r")
     end
+    local eta = GetAffixRerollETA()
+    header = header .. "\n|cff000000Next reroll in:|r " .. ((eta > 0) and FormatDurationShort(eta) or "soon")
     player:GossipMenuAddItem(0, header, 0, 0)
 
     if MYTHIC_KILL_LOCK[instanceId] then
@@ -416,7 +498,7 @@ function Pedestal_OnGossipHello(_, player, creature)
       player:GossipMenuAddItem(0, lockMsg, 0, 999)
       player:SendBroadcastMessage(lockMsg)
     else
-      for tier=1,3 do
+      for tier = 1, 3 do
         local cfg = TIER_CONFIG[tier]
         player:GossipMenuAddItem(10, string.format("%sTier %d|r", cfg.color, tier), 0, 100 + tier, false, "", 0, ICONS[tier])
       end
@@ -427,7 +509,6 @@ function Pedestal_OnGossipHello(_, player, creature)
   player:GossipSendMenu(1, creature)
 end
 
--- full, closed function
 function Pedestal_OnGossipSelect(_, player, creature, _, intid)
   if intid == 999 then
     local map = player:GetMap()
@@ -448,7 +529,7 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
 
   if intid == 211 or intid == 212 or intid == 213 then
     if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to change affixes."); player:GossipComplete(); return end
-    Gossip_ShowAffixTierMenu(player, creature, (intid==211 and 1) or (intid==212 and 2) or 3); return
+    Gossip_ShowAffixTierMenu(player, creature, (intid == 211 and 1) or (intid == 212 and 2) or 3); return
   end
 
   if intid >= 300 then
@@ -457,8 +538,11 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     if tier < 1 or tier > 3 then player:GossipComplete(); return end
     local chosen = (WEEKLY_AFFIX_POOL[tier] or {})[idx]
     if not chosen then player:SendBroadcastMessage("|cffff0000[Mythic]|r Invalid affix selection."); player:GossipComplete(); return end
+
     local before = WEEKLY_AFFIXES[tier] and WEEKLY_AFFIXES[tier].name or "None"
     WEEKLY_AFFIXES[tier] = chosen
+    ResetAffixCountdown()
+
     SendWorldMessage(string.format("|cffffcc00[Mythic]|r Tier %d affix set: %s -> %s", tier, before, chosen.name))
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r New affixes: " .. GetAffixNamesString(3))
     Gossip_ShowAffixTierMenu(player, creature, tier); return
@@ -476,19 +560,19 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     if map:GetDifficulty() == 0 then player:SendBroadcastMessage("|cffff0000Mythic keys cannot be used in Normal mode dungeons.|r"); player:GossipComplete(); return end
 
     -- Activate run
-    local guid = player:GetGUIDLow()
+    local guid    = player:GetGUIDLow()
     local affixes = GetAffixSet(tier)
-    local cfg = TIER_CONFIG[tier]
+    local cfg     = TIER_CONFIG[tier]
 
     local names = {}
-    for i=1,tier do local a=WEEKLY_AFFIXES[i]; if a then table.insert(names, (AFFIX_COLOR_MAP[a.name] or "|cffffffff")..a.name.."|r") end end
+    for i = 1, tier do local a = WEEKLY_AFFIXES[i]; if a then table.insert(names, (AFFIX_COLOR_MAP[a.name] or "|cffffffff") .. a.name .. "|r") end end
 
-    MYTHIC_FLAG_TABLE[instanceId] = true
-    MYTHIC_AFFIXES_TABLE[instanceId] = affixes
-    MYTHIC_REWARD_CHANCE_TABLE[instanceId] = (tier==1 and 1.5) or (tier==2 and 2.0) or 5.0
-    MYTHIC_TIER_TABLE[instanceId] = tier
-    MYTHIC_COMPLETION_STATE[instanceId] = "active"
-    MYTHIC_DEATHS[instanceId] = {}
+    MYTHIC_FLAG_TABLE[instanceId]          = true
+    MYTHIC_AFFIXES_TABLE[instanceId]       = affixes
+    MYTHIC_REWARD_CHANCE_TABLE[instanceId] = (tier == 1 and 1.5) or (tier == 2 and 2.0) or 5.0
+    MYTHIC_TIER_TABLE[instanceId]          = tier
+    MYTHIC_COMPLETION_STATE[instanceId]    = "active"
+    MYTHIC_DEATHS[instanceId]              = {}
 
     ScheduleMythicTimeout(player, instanceId, tier)
 
@@ -505,11 +589,12 @@ function Pedestal_OnGossipSelect(_, player, creature, _, intid)
     ApplyAuraToNearbyCreatures(player, affixes)
     StartAuraLoop(player, instanceId, map:GetMapId(), affixes)
 
+    local affix_str = SerializeAffixes(affixes)
     SafeDBExecute([[
-      INSERT INTO character_mythic_instance_state (guid, instance_id, map_id, tier, created_at)
-      VALUES (%d, %d, %d, %d, FROM_UNIXTIME(%d))
-      ON DUPLICATE KEY UPDATE tier=VALUES(tier), created_at=VALUES(created_at)
-    ]], guid, instanceId, map:GetMapId(), tier, os.time())
+      INSERT INTO character_mythic_instance_state (guid, instance_id, map_id, tier, affix_spells, created_at)
+      VALUES (%d, %d, %d, %d, '%s', FROM_UNIXTIME(%d))
+      ON DUPLICATE KEY UPDATE tier=VALUES(tier), affix_spells=VALUES(affix_spells), created_at=VALUES(created_at)
+    ]], guid, instanceId, map:GetMapId(), tier, affix_str, os.time())
 
     player:GossipComplete()
   end
@@ -555,7 +640,7 @@ RegisterPlayerEvent(28, function(_, player)
   local instanceId, mapId, guid = map:GetInstanceId(), map:GetMapId(), player:GetGUIDLow()
   if MYTHIC_COMPLETION_STATE[instanceId] == "failed" or MYTHIC_COMPLETION_STATE[instanceId] == "completed" then return end
 
-  local res = SafeDBQuery("SELECT tier, UNIX_TIMESTAMP(created_at) FROM character_mythic_instance_state WHERE guid = %d AND instance_id = %d AND map_id = %d", guid, instanceId, mapId)
+  local res = SafeDBQuery("SELECT tier, UNIX_TIMESTAMP(created_at), affix_spells FROM character_mythic_instance_state WHERE guid = %d AND instance_id = %d AND map_id = %d", guid, instanceId, mapId)
   if not res then return end
 
   local tier, created = res:GetUInt32(0), res:GetUInt32(1)
@@ -565,48 +650,82 @@ RegisterPlayerEvent(28, function(_, player)
     return
   end
 
-  local affixes = GetAffixSet(tier)
-  MYTHIC_FLAG_TABLE[instanceId] = true
-  MYTHIC_AFFIXES_TABLE[instanceId] = affixes
-  MYTHIC_REWARD_CHANCE_TABLE[instanceId] = (tier==1 and 1.5) or (tier==2 and 2.0) or 5.0
-  MYTHIC_TIER_TABLE[instanceId] = tier
-  MYTHIC_COMPLETION_STATE[instanceId] = "active"
+  local saved_affixes = res:GetString(2)
+  local affixes = (#saved_affixes > 0) and ParseAffixes(saved_affixes) or GetAffixSet(tier)
+
+  MYTHIC_FLAG_TABLE[instanceId]          = true
+  MYTHIC_AFFIXES_TABLE[instanceId]       = affixes
+  MYTHIC_REWARD_CHANCE_TABLE[instanceId] = (tier == 1 and 1.5) or (tier == 2 and 2.0) or 5.0
+  MYTHIC_TIER_TABLE[instanceId]          = tier
+  MYTHIC_COMPLETION_STATE[instanceId]    = "active"
 
   player:SendBroadcastMessage("|cffffff00[Mythic]|r Resuming active Mythic+ affixes.")
   ApplyAuraToNearbyCreatures(player, affixes)
   if not MYTHIC_LOOP_HANDLERS[instanceId] then StartAuraLoop(player, instanceId, mapId, affixes) end
 
-  local cfg = TIER_CONFIG[tier]; if cfg and not player:HasAura(cfg.aura) then player:AddAura(cfg.aura, player) end
+  -- Rebuild remaining timer window
+  local totalMin  = ComputeTierMinutes(mapId, tier)
+  local elapsed   = os.time() - created
+  local remaining = math.max(0, totalMin * 60 - elapsed)
+  local auraId    = TIER_CONFIG[tier] and TIER_CONFIG[tier].aura or 0
+
+  if remaining == 0 then
+    MYTHIC_TIMER_EXPIRED[instanceId]  = true
+    MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+    player:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded while you were away.")
+    if auraId ~= 0 and player:HasAura(auraId) then player:RemoveAura(auraId) end
+    CleanupMythicInstance(instanceId)
+  else
+    if auraId ~= 0 and not player:HasAura(auraId) then player:AddAura(auraId, player) end
+    local keepAuraEvent = CreateLuaEvent(function()
+      local p = GetPlayerByGUID(guid)
+      if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] and auraId ~= 0 and not p:HasAura(auraId) then
+        p:AddAura(auraId, p)
+      end
+    end, 5000, 0)
+
+    CreateLuaEvent(function()
+      local p = GetPlayerByGUID(guid)
+      if p and MYTHIC_FLAG_TABLE[instanceId] and not MYTHIC_TIMER_EXPIRED[instanceId] then
+        local mapNow = p:GetMap()
+        MYTHIC_TIMER_EXPIRED[instanceId] = true
+        p:SendBroadcastMessage("|cffff0000[Mythic]|r Time limit exceeded. You are no longer eligible for rewards.")
+        MYTHIC_MODE_ENDED[instanceId] = true
+        if auraId ~= 0 and p:HasAura(auraId) then p:RemoveAura(auraId) end
+        MYTHIC_COMPLETION_STATE[instanceId] = "failed"
+        if mapNow then RemoveAffixAurasFromAllCreatures(instanceId, mapNow) end
+        CleanupMythicInstance(instanceId)
+      end
+      RemoveEventById(keepAuraEvent)
+    end, remaining * 1000, 1)
+  end
 end)
 
 --==========================================================
--- Login Blurb (weekly affix display)
+-- Login Blurb (affixes + ETA)
 --==========================================================
 RegisterPlayerEvent(3, function(_, player)
   local parts = {}
   for _, aff in ipairs(WEEKLY_AFFIXES) do table.insert(parts, (AFFIX_COLOR_MAP[aff.name] or "|cffffffff") .. aff.name .. "|r") end
-  player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(parts, ", "))
+  local eta = GetAffixRerollETA()
+  player:SendBroadcastMessage("|cffffcc00[Mythic]|r This week's affixes: " .. table.concat(parts, ", ")
+    .. "  |  Next reroll in: " .. ((eta > 0) and FormatDurationShort(eta) or "soon"))
 end)
 
---===============================================================
+--==========================================================
 -- Command Handler (.simclean, .sim/.simulate, .mythicroll, etc.)
---===============================================================
+--==========================================================
 RegisterPlayerEvent(42, function(_, player, command)
   if not player then return false end
   local cmd = command:lower():gsub("[#./]", "")
   local guid, now = player:GetGUIDLow(), os.time()
 
-  -- GM utility: removes nearby sim-spawned chests (temporary GOB)
+  -- GM: remove nearby sim-spawned chests
   if cmd:sub(1,8) == "simclean" then
-    if not player:IsGM() then
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
-      return false
-    end
+    if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command."); return false end
     local tokens = {}; for w in cmd:gmatch("%S+") do table.insert(tokens, w) end
     local radius = tonumber(tokens[2]) or 80
-
     local TARGET_CHEST = { [900010]=true, [900011]=true, [900012]=true, [900013]=true }
-
     local removed = 0
     local list = player:GetGameObjectsInRange(radius) or {}
     for _, go in pairs(list) do
@@ -616,38 +735,30 @@ RegisterPlayerEvent(42, function(_, player, command)
         removed = removed + 1
       end
     end
-
     player:SendBroadcastMessage(string.format("|cffffcc00[Mythic]|r simclean: removed %d chest(s) within %d yards.", removed, radius))
     return false
   end
 
-  if cmd == "mythicaffix" then
-    player:SendBroadcastMessage("|cff66ccff[Mythic]|r Current affixes: " .. GetAffixNamesString(3))
-    return false
-  end
+  -- Affix display + countdown
+if cmd == "mythictimer" then
+  local eta  = GetAffixRerollETA()
+  local when = (eta > 0) and FormatDurationShort(eta) or "soon"
+  player:SendBroadcastMessage("|cff66ccff[Mythic]|r Current affixes: " .. GetAffixNamesString(3))
+  player:SendBroadcastMessage("|cffffff00Next reroll in:|r " .. when)
+  return false
+end
 
-  -- GM: quickly spawn a chest anywhere (no rating/flags). Auto-despawns after 60s.
+  -- GM: simulate chest (no rating/flags)
   if cmd:sub(1,3) == "sim" or cmd:sub(1,8) == "simulate" then
-    if not player:IsGM() then
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
-      return false
-    end
-
+    if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command."); return false end
     local tokens = {}; for w in cmd:gmatch("%S+") do table.insert(tokens, w) end
     local tier
-    if tonumber(tokens[2]) then
-      tier = tonumber(tokens[2])
-    elseif tokens[2] == "tier" and tonumber(tokens[3]) then
-      tier = tonumber(tokens[3])
-    end
-    if not tier or tier < 1 or tier > 3 then
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .sim <1-3>  or  .sim tier <1-3>")
-      return false
-    end
+    if tonumber(tokens[2]) then tier = tonumber(tokens[2])
+    elseif tokens[2] == "tier" and tonumber(tokens[3]) then tier = tonumber(tokens[3]) end
+    if not tier or tier < 1 or tier > 3 then player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .sim <1-3>  or  .sim tier <1-3>"); return false end
 
-    local map = player:GetMap()
-    local mapId = map and map:GetMapId() or 0
-    local instanceId = map and map:GetInstanceId() or 0
+    local map, mapId, instanceId = player:GetMap(), 0, 0
+    if map then mapId = map:GetMapId(); instanceId = map:GetInstanceId() end
 
     local chestEntry
     if tier == 2 then
@@ -657,8 +768,6 @@ RegisterPlayerEvent(42, function(_, player, command)
     end
 
     local x, y, z, o = player:GetX(), player:GetY(), player:GetZ(), player:GetO()
-
-    -- Spawn unsaved (temp) chest; then schedule cleanup (GO-safe).
     local chest = PerformIngameSpawn(2, chestEntry, mapId, instanceId, x, y, z, o, false)
     if chest then
       local guidLow = chest:GetGUIDLow()
@@ -676,41 +785,57 @@ RegisterPlayerEvent(42, function(_, player, command)
   end
 
   -- GM: roll/set affixes
-  if cmd:sub(1,10) == "mythicroll" then
+  if cmd == "mythicroll" or cmd:find("^mythicroll%s") then
     if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command."); return false end
+
     local tokens = {}; for w in cmd:gmatch("%S+") do table.insert(tokens, w) end
-    if #tokens == 1 then
-      local old = { WEEKLY_AFFIXES[1] and WEEKLY_AFFIXES[1].name, WEEKLY_AFFIXES[2] and WEEKLY_AFFIXES[2].name, WEEKLY_AFFIXES[3] and WEEKLY_AFFIXES[3].name }
-      for t=1,3 do RerollTierAffix(t) end
+
+    -- ".mythicroll" or ".mythicroll all" → reroll all
+    if tokens[2] == nil or (tokens[2] == "all" and tokens[3] == nil) then
+      local old = {
+        WEEKLY_AFFIXES[1] and WEEKLY_AFFIXES[1].name or "None",
+        WEEKLY_AFFIXES[2] and WEEKLY_AFFIXES[2].name or "None",
+        WEEKLY_AFFIXES[3] and WEEKLY_AFFIXES[3].name or "None"
+      }
+      for t = 1, 3 do RerollTierAffix(t) end
+      ResetAffixCountdown()
       SendWorldMessage(string.format("|cffffcc00[Mythic]|r Affixes re-rolled: T1 %s -> %s, T2 %s -> %s, T3 %s -> %s",
-        old[1] or "None", WEEKLY_AFFIXES[1].name, old[2] or "None", WEEKLY_AFFIXES[2].name, old[3] or "None", WEEKLY_AFFIXES[3].name))
+        old[1], WEEKLY_AFFIXES[1].name, old[2], WEEKLY_AFFIXES[2].name, old[3], WEEKLY_AFFIXES[3].name))
       return false
     end
+
+    -- ".mythicroll tier <n> [affix...]"
     if tokens[2] ~= "tier" or not tonumber(tokens[3]) then
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .mythicroll  |  .mythicroll tier <1-3>  |  .mythicroll tier <1-3> <affix name>")
+      player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .mythicroll  |  .mythicroll all  |  .mythicroll tier <1-3>  |  .mythicroll tier <1-3> <affix>")
       return false
     end
-    local tier = tonumber(tokens[3]); if tier < 1 or tier > 3 then player:SendBroadcastMessage("|cffff0000[Mythic]|r Tier must be 1, 2, or 3."); return false end
+
+    local tier = tonumber(tokens[3])
+    if tier < 1 or tier > 3 then player:SendBroadcastMessage("|cffff0000[Mythic]|r Tier must be 1, 2, or 3."); return false end
+
     if #tokens == 3 then
       local before = WEEKLY_AFFIXES[tier] and WEEKLY_AFFIXES[tier].name or "None"
-      local after = RerollTierAffix(tier)
+      local after  = RerollTierAffix(tier)
       if after then
+        ResetAffixCountdown()
         SendWorldMessage(string.format("|cffffcc00[Mythic]|r Tier %d affix re-rolled: %s -> %s", tier, before, after.name))
         player:SendBroadcastMessage("|cff66ccff[Mythic]|r New affixes: " .. GetAffixNamesString(3))
       end
       return false
     end
-    local desired = table.concat(tokens, " ", 4):gsub("^%s+", ""):gsub("%s+$", ""); if desired == "" then
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r Missing affix name. Example: .mythicroll tier 1 resistant"); return false
-    end
+
+    local desired = table.concat(tokens, " ", 4):gsub("^%s+", ""):gsub("%s+$", ""):lower()
+    if desired == "" then player:SendBroadcastMessage("|cffff0000[Mythic]|r Missing affix name. Example: .mythicroll tier 1 resistant"); return false end
     local aff = FindAffixByNameInTier(tier, desired)
     if not aff then
       local names = {}; for _, a in ipairs(WEEKLY_AFFIX_POOL[tier] or {}) do table.insert(names, a.name:lower()) end
       player:SendBroadcastMessage("|cffff0000[Mythic]|r Invalid affix for Tier " .. tier .. ". Valid: " .. table.concat(names, ", "))
       return false
     end
+
     local before = WEEKLY_AFFIXES[tier] and WEEKLY_AFFIXES[tier].name or "None"
     WEEKLY_AFFIXES[tier] = aff
+    ResetAffixCountdown()
     SendWorldMessage(string.format("|cffffcc00[Mythic]|r Tier %d affix set: %s -> %s", tier, before, aff.name))
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r New affixes: " .. GetAffixNamesString(3))
     return false
@@ -735,11 +860,11 @@ RegisterPlayerEvent(42, function(_, player, command)
   if cmd == "mythichelp" then
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r Available commands:")
     player:SendBroadcastMessage("|cffffff00.mythicrating|r - View your Mythic+ rating and runs.")
-    player:SendBroadcastMessage("|cffffff00.mythicaffix|r - View the current Mythic affixes.")
+    player:SendBroadcastMessage("|cffffff00.mythictimer|r - Current affixes & next reroll ETA.")
     player:SendBroadcastMessage("|cffffff00.mythichelp|r - Show this help menu.")
     if player:IsGM() then
       player:SendBroadcastMessage("|cffff6600GM note:|r You can also modify affixes by talking to the Mythic Pedestal NPC while GM mode is enabled.")
-      player:SendBroadcastMessage("|cffff6600.mythicroll|r - GM: Reroll all affixes.")
+      player:SendBroadcastMessage("|cffff6600.mythicroll all|r - GM: Reroll all affixes.")
       player:SendBroadcastMessage("|cffff6600.mythicroll tier <1-3>|r - GM: Reroll a specific tier.")
       player:SendBroadcastMessage("|cffff6600.mythicroll tier <1-3> <affix>|r - GM: Set a specific affix (e.g., resistant).")
       player:SendBroadcastMessage("|cffff6600.sim tier <1-3>|r - GM: Spawn a Tier chest without awarding rating or tokens.")
@@ -754,7 +879,8 @@ RegisterPlayerEvent(42, function(_, player, command)
 
   -- GM: global rating reset (two-step confirm)
   if cmd == "mythicreset" then
-    if not player:IsGM() then player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
+    if not player:IsGM() then
+      player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to use this command.")
     else
       __MYTHIC_RESET_PENDING__[guid] = now
       player:SendBroadcastMessage("|cffffff00[Mythic]|r Type |cff00ff00.mythicreset confirm|r within 30 seconds to confirm full reset.")
@@ -794,7 +920,7 @@ for mapId, data in pairs(MYTHIC_FINAL_BOSSES) do
       if not MYTHIC_FLAG_TABLE[instanceId] then return end
 
       local expired = MYTHIC_TIMER_EXPIRED[instanceId]
-      local tier = MYTHIC_TIER_TABLE[instanceId] or 1
+      local tier    = MYTHIC_TIER_TABLE[instanceId] or 1
 
       -- Snapshot deaths per player for rating calc
       local playerDeaths = {}
