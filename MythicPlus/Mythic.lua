@@ -49,6 +49,7 @@ local MYTHIC_COMPLETION_STATE    = MYTHIC_COMPLETION_STATE    or {} -- "active" 
 local __MYTHIC_RATING_COOLDOWN__ = __MYTHIC_RATING_COOLDOWN__ or {}
 local __MYTHIC_RESET_PENDING__   = __MYTHIC_RESET_PENDING__   or {}
 local __MYTHIC_TIMER_COOLDOWN__  = __MYTHIC_TIMER_COOLDOWN__  or {}
+local __MYTHIC_AFFIX_COOLDOWN__  = __MYTHIC_AFFIX_COOLDOWN__  or {}
 
 -- Forward decls
 local CleanupMythicInstance
@@ -1006,47 +1007,95 @@ RegisterPlayerEvent(42, function(_, player, command)
   if cmd:sub(1,12) == "mythicrating" then
     local tokens = {}; for w in cmd:gmatch("%S+") do table.insert(tokens, w) end
 
-    -- GM: .mythicrating set <value>
+    -- GM: .mythicrating set <value> [playerName]
     if tokens[2] == "set" then
       if not player:IsGM() then
         player:SendBroadcastMessage("|cffff0000[Mythic]|r You do not have permission to set ratings.")
         return false
       end
+
       local newVal = tonumber(tokens[3])
       if not newVal then
-        player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .mythicrating set <number>")
+        player:SendBroadcastMessage("|cffff0000[Mythic]|r Usage: .mythicrating set <number> [playerName]")
         return false
       end
+
       if newVal < 0 then newVal = 0 end
       if newVal > RATING_CAP then newVal = RATING_CAP end
 
-      local pguid = player:GetGUIDLow()
+      local targetGuid, targetPlayer, targetName
+
+      if tokens[4] then
+        local nameArg = tokens[4]
+        -- Prefer online player
+        targetPlayer = GetPlayerByName(nameArg)
+        if targetPlayer then
+          targetGuid = targetPlayer:GetGUIDLow()
+          targetName = targetPlayer:GetName()
+        else
+          -- Fallback: offline by name (case-insensitive)
+          local row = SafeDBQuery(
+            "SELECT guid, name FROM characters WHERE LOWER(name)=LOWER('%s') LIMIT 1",
+            nameArg:gsub("'", "''")
+          )
+          if not row then
+            player:SendBroadcastMessage("|cffff0000[Mythic]|r Player not found: " .. nameArg)
+            return false
+          end
+          targetGuid = row:GetUInt32(0)
+          targetName = row:GetString(1)
+        end
+      else
+        -- No name → set your own rating
+        targetGuid = player:GetGUIDLow()
+        targetName = player:GetName()
+      end
+
       SafeDBExecute([[
         INSERT INTO character_mythic_rating (guid,total_runs,total_points,claimed_tier1,claimed_tier2,claimed_tier3,last_updated)
         VALUES (%d,0,%d,0,0,0,NOW())
         ON DUPLICATE KEY UPDATE total_points=%d,last_updated=NOW()
-      ]], pguid, newVal, newVal)
+      ]], targetGuid, newVal, newVal)
 
-      player:SendBroadcastMessage(string.format("|cff66ccff[Mythic]|r Your rating has been set to %s%d|r", GetRatingColor(newVal), newVal))
+      if targetPlayer then
+        targetPlayer:SendBroadcastMessage(string.format(
+          "|cff66ccff[Mythic]|r Your rating has been set to %s%d|r by a GM.",
+          GetRatingColor(newVal), newVal
+        ))
+      end
+
+      player:SendBroadcastMessage(string.format(
+        "|cff66ccff[Mythic]|r Set %s's rating to %s%d|r.",
+        targetName, GetRatingColor(newVal), newVal
+      ))
       return false
-    end
 
-    -- Normal .mythicrating (rate-limited for players)
-    local last = __MYTHIC_RATING_COOLDOWN__[guid] or 0
-    if now - last < COMMAND_COOLDOWN then
-      player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can only use this command once every 5 minutes.")
-      return false
-    end
-    __MYTHIC_RATING_COOLDOWN__[guid] = now
-
-    local q = SafeDBQuery("SELECT total_points, total_runs FROM character_mythic_rating WHERE guid = %d", guid)
-    if q then
-      local rating, runs = q:GetUInt32(0), q:GetUInt32(1)
-      player:SendBroadcastMessage(string.format("|cff66ccff[Mythic]|r Rating: %s%d|r (|cffffcc00%d runs completed|r)", GetRatingColor(rating), rating, runs))
+    -- Player: view rating (cooldowned)
     else
-      player:SendBroadcastMessage("|cffff0000[Mythic]|r No rating found. Complete a Mythic+ dungeon to begin tracking.")
+      local last = __MYTHIC_RATING_COOLDOWN__[guid] or 0
+      if now - last < COMMAND_COOLDOWN then
+        local remain = COMMAND_COOLDOWN - (now - last)
+        player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can use |cffffff00.mythicrating|r again in " .. FormatDurationShort(remain) .. ".")
+        return false
+      end
+      __MYTHIC_RATING_COOLDOWN__[guid] = now
+
+      local row = SafeDBQuery("SELECT total_points, total_runs, claimed_tier1, claimed_tier2, claimed_tier3 FROM character_mythic_rating WHERE guid=%d", guid)
+      if row then
+        local pts  = row:GetUInt32(0)
+        local runs = row:GetUInt32(1)
+        local c1   = row:GetUInt32(2)
+        local c2   = row:GetUInt32(3)
+        local c3   = row:GetUInt32(4)
+        player:SendBroadcastMessage(string.format(
+          "|cff66ccff[Mythic]|r Rating: %s%d|r  (|cffffcc00%d runs|r) — Chests: T1 %d, T2 %d, T3 %d",
+          GetRatingColor(pts), pts, runs, c1, c2, c3
+        ))
+      else
+        player:SendBroadcastMessage("|cff66ccff[Mythic]|r Rating: |cffffcc000|r (no runs yet)")
+      end
+      return false
     end
-    return false
   end
 
   -- GM: instant leaderboard wipe (best-times only, no confirmation)
@@ -1062,12 +1111,27 @@ RegisterPlayerEvent(42, function(_, player, command)
     return false
   end
 
+    -- Show current weekly affixes (5 min cooldown)
+  if cmd == "mythicaffix" or cmd == "mythicaffixes" then
+    local last = __MYTHIC_AFFIX_COOLDOWN__[guid] or 0
+    if now - last < TIMER_COMMAND_COOLDOWN then
+      local remain = TIMER_COMMAND_COOLDOWN - (now - last)
+      player:SendBroadcastMessage("|cffffcc00[Mythic]|r You can use |cffffff00.mythicaffix|r again in " .. FormatDurationShort(remain) .. ".")
+      return false
+    end
+    __MYTHIC_AFFIX_COOLDOWN__[guid] = now
+
+    player:SendBroadcastMessage("|cff66ccff[Mythic]|r Current affixes: " .. GetAffixNamesString(3))
+    return false
+  end
+
   -- Help / GM help
   if cmd == "mythichelp" then
     player:SendBroadcastMessage("|cff66ccff[Mythic]|r Available commands:")
     player:SendBroadcastMessage("|cffffff00.mythicrating|r - View your Mythic+ rating and runs.")
     player:SendBroadcastMessage("|cffffff00.mythictimer|r - Current affixes & next reroll ETA (5 min cooldown).")
     player:SendBroadcastMessage("|cffffff00.mythichelp|r - Show this help menu.")
+    player:SendBroadcastMessage("|cffffff00.mythicaffix|r - Show current Mythic+ affixes (5 min cooldown).")
     if player:IsGM() then
       player:SendBroadcastMessage("|cffff6600GM note:|r You can also modify affixes by talking to the Mythic Pedestal NPC while GM mode is enabled.")
       player:SendBroadcastMessage("|cffff6600.mythicroll all|r - GM: Reroll all affixes.")
@@ -1078,7 +1142,7 @@ RegisterPlayerEvent(42, function(_, player, command)
       player:SendBroadcastMessage("|cffff6600.mythicreset confirm|r - GM: Confirm the reset within 30 seconds.")
       player:SendBroadcastMessage("|cffff6600.simclean [radius]|r - GM: Remove nearby sim-spawned chests (default radius 80).")
       player:SendBroadcastMessage("|cffff6600.mythiclbreset|r - GM: Reset best-time leaderboards instantly.")
-      player:SendBroadcastMessage("|cffff6600.mythicrating set <n>|r - GM: Force-set your rating.")
+      player:SendBroadcastMessage("|cffff6600.mythicrating set <n> [player]|r - GM: Force-set rating (self or target).")
     else
       player:SendBroadcastMessage("|cffaaaaaa(More settings are available with GM mode enabled.)|r")
     end
