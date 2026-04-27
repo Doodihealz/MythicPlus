@@ -1,6 +1,6 @@
 I recommend checking out Huptiq's version of this mod too! https://github.com/huptiq/MythicPlus
 
-# Mythic+ Eluna Script for WotLK Azerothcore
+# Mythic+ Ale Script for WotLK Azerothcore
 
 A full-featured, Mythic+ style challenge system for Eluna-based Wrath of the Lich King Azerothcore servers.  
 Supports timed runs, weekly affixes, rating progression, loot chests, rating penalties, setting affixes, testing loot chests, and a custom keystone NPC.
