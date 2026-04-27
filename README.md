@@ -24,7 +24,8 @@ Run these SQL files on the **appropriate databases**:
 
 ### 1. Lua Scripts
 Place in your server’s Lua scripts folder:
-- `Mythic.lua` (this file)
+- `Mythic.lua` is the server side script
+- `MythicPlus` is the addon that correlates with the server side script.
 
 ### 2. Keystone NPC (Manual or SQL)
 - **NPC Entry**: `900001`
