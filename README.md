@@ -22,17 +22,11 @@ Run these SQL files on the **appropriate databases**:
 | `Character_Mythic_score.sql`| Tracks player Mythic+ rating and run history           | character   |
 | `mythic_instance_state.sql` | Stores persistent Mythic+ state across sessions        | character   |
 
-### 2. Lua Scripts
+### 1. Lua Scripts
 Place in your server’s Lua scripts folder:
 - `Mythic.lua` (this file)
-- `MythicBosses.lua` (define dungeon maps, boss IDs, and final boss)
 
-Make sure your `dofile()` points to the correct location:
-```lua
-dofile(".../MythicBosses.lua")
-```
-
-### 3. Keystone NPC (Manual or SQL)
+### 2. Keystone NPC (Manual or SQL)
 - **NPC Entry**: `900001`
 - **Name**: Mythic Advisor  
 - **Subname**: The Keystone Exchanger  
@@ -71,22 +65,6 @@ When Mythic+ is activated:
 - **Tier 3 keys** apply all three tiers of affixes  
 
 > Each week's affix set is randomly selected — 1 per tier — from the defined `WEEKLY_AFFIX_POOL`.
-
-### Affix Tier Table
-
-| Tier | Affix Name         |
-|------|--------------------|
-| 1    | Rejuvenating       |
-| 1    | Demonism           |
-| 1    | Resistant          |
-|------|--------------------|
-| 2    | Turtling           |
-| 2    | Priest Empowered   |
-| 2    | Falling Stars      |
-|------|--------------------|
-| 3    | Enrage             |
-| 3    | Rallying           |
-| 3    | Consecrated        |
 
 ---
 
