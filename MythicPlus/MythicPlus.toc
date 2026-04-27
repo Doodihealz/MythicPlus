@@ -1,9 +1,0 @@
-## Interface: 30300
-## Title: MythicPlus
-## Notes: Mythic+ dungeon tracker with affixes, progress, and timer display
-## Author: Custom
-## Version: 1.1.0
-## OptionalDeps: AIO_Client
-## SavedVariables: MythicPlusDB
-
-MythicPlus.lua
