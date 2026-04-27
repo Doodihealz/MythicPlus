@@ -1,6 +1,7 @@
 I recommend checking out Huptiq's version of this mod too! https://github.com/huptiq/MythicPlus
 
 # Mythic+ Ale Script for WotLK Azerothcore
+# This system now requires AIO
 
 A full-featured, Mythic+ style challenge system for Ale-based Wrath of the Lich King Azerothcore servers.  
 Supports timed runs, weekly affixes, rating progression, loot chests, rating penalties, setting affixes, testing loot chests, and a custom keystone NPC.
@@ -22,10 +23,9 @@ Run these SQL files on the **appropriate databases**:
 | `Character_Mythic_score.sql`| Tracks player Mythic+ rating and run history           | character   |
 | `mythic_instance_state.sql` | Stores persistent Mythic+ state across sessions        | character   |
 
-### 1. Lua Scripts
-Place in your server’s Lua scripts folder:
-- `Mythic.lua` is the server side script
-- `MythicPlus` is the addon that correlates with the server side script.
+### 1. Installation instructions
+- Place `Mythic.lua` is the server side script
+- Put the `MythicPlus` addon into your client addon folder
 
 ### 2. Keystone NPC (Manual or SQL)
 - **NPC Entry**: `900001`
